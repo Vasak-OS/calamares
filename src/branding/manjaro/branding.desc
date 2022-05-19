@@ -49,10 +49,10 @@ windowPlacement: center
 strings:
     productName:         Manjaro Linux
     shortProductName:    Manjaro
-    version:             19.0
-    shortVersion:        19.0
-    versionedName:       Manjaro Linux 19.0 "Kyria"
-    shortVersionedName:  Manjaro 19.0
+    version:             20.1
+    shortVersion:        20.1
+    versionedName:       Manjaro Linux 20.1 "Mikah"
+    shortVersionedName:  Manjaro 20.1
     bootloaderEntryName: Manjaro
 
 # These images are loaded from the branding module directory.
@@ -77,6 +77,19 @@ images:
 # The slideshow is displayed during execution steps (e.g. when the
 # installer is actually writing to disk and doing other slow things).
 slideshow:               "show.qml"
+
+# There are two available APIs for a QML slideshow:
+#  - 1 (the default) loads the entire slideshow when the installation-
+#      slideshow page is shown and starts the QML then. The QML
+#      is never stopped (after installation is done, times etc.
+#      continue to fire).
+#  - 2 loads the slideshow on startup and calls onActivate() and
+#      onLeave() in the root object. After the installation is done,
+#      the show is stopped (first by calling onLeave(), then destroying
+#      the QML components).
+#
+# An image slideshow does not need to have the API defined.
+slideshowAPI: 1
 
 # Colors for text and background components.
 #
