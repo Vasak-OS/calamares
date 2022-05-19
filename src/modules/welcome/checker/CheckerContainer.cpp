@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2017, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017, 2019-2020, Adriaan de Groot <groot@kde.org>
- *   Copyright 2017, Gabriel Craciunescu <crazy@frugalware.org>
+ *   SPDX-FileCopyrightText: 2014-2017 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Gabriel Craciunescu <crazy@frugalware.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 /* Based on code extracted from RequirementsChecker.cpp */
@@ -31,19 +22,20 @@
 
 #include <QHBoxLayout>
 
-CheckerContainer::CheckerContainer( const Calamares::RequirementsModel &model, QWidget* parent )
+CheckerContainer::CheckerContainer( Config* config, QWidget* parent )
     : QWidget( parent )
     , m_waitingWidget( new WaitingWidget( QString(), this ) )
     , m_checkerWidget( nullptr )
     , m_verdict( false )
-    , m_model( model )
+    , m_config( config )
 {
     QBoxLayout* mainLayout = new QHBoxLayout;
     setLayout( mainLayout );
     CalamaresUtils::unmarginLayout( mainLayout );
 
     mainLayout->addWidget( m_waitingWidget );
-    CALAMARES_RETRANSLATE( if ( m_waitingWidget ) m_waitingWidget->setText( tr( "Gathering system information..." ) ); )
+    CALAMARES_RETRANSLATE( if ( m_waitingWidget )
+                               m_waitingWidget->setText( tr( "Gathering system information..." ) ); );
 }
 
 CheckerContainer::~CheckerContainer()
@@ -55,12 +47,30 @@ CheckerContainer::~CheckerContainer()
 void
 CheckerContainer::requirementsComplete( bool ok )
 {
+    if ( !ok )
+    {
+        auto& model = *( m_config->requirementsModel() );
+        cDebug() << "Requirements not satisfied" << model.count() << "entries:";
+        for ( int i = 0; i < model.count(); ++i )
+        {
+            auto index = model.index( i );
+            const bool satisfied = model.data( index, Calamares::RequirementsModel::Satisfied ).toBool();
+            const bool mandatory = model.data( index, Calamares::RequirementsModel::Mandatory ).toBool();
+            if ( !satisfied )
+            {
+                cDebug() << Logger::SubEntry << i << model.data( index, Calamares::RequirementsModel::Name ).toString()
+                         << "not-satisfied"
+                         << "mandatory?" << mandatory;
+            }
+        }
+    }
 
     layout()->removeWidget( m_waitingWidget );
     m_waitingWidget->deleteLater();
     m_waitingWidget = nullptr;  // Don't delete in destructor
 
-    m_checkerWidget = new ResultsListWidget( m_model, this);
+    m_checkerWidget = new ResultsListWidget( m_config, this );
+    m_checkerWidget->setObjectName( "requirementsChecker" );
     layout()->addWidget( m_checkerWidget );
 
     m_verdict = ok;

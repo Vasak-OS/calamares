@@ -1,20 +1,15 @@
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
+###
 #
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   SPDX-License-Identifier: GPL-3.0+
-#   License-Filename: LICENSE
+#   Individual files may have different licenses (like the CMake
+#   infrastructure, which is BSD-2-Clause licensed). Check the SPDX
+#   identifiers in each file.
 #
 ###
 #
@@ -27,8 +22,13 @@
 #   USE_<foo>       : fills in SKIP_MODULES for modules called <foo>-<something>
 #   WITH_<foo>      : try to enable <foo> (these usually default to ON). For
 #                     a list of WITH_<foo> grep CMakeCache.txt after running
-#                     CMake once.
+#                     CMake once. These affect the ABI offered by Calamares.
+#                       - PYTHON (enable Python Job modules)
+#                       - QML (enable QML UI View modules)
+#                       - PYTHONQT # TODO:3.3: remove
 #   BUILD_<foo>     : choose additional things to build
+#                       - TESTING (standard CMake option)
+#                       - SCHEMA_TESTING (requires Python, see ci/configvalidator.py)
 #   DEBUG_<foo>     : special developer flags for debugging
 #
 # Example usage:
@@ -38,21 +38,44 @@
 # One special target is "show-version", which can be built
 # to obtain the version number from here.
 
+# TODO:3.3: Require CMake 3.12
 cmake_minimum_required( VERSION 3.3 FATAL_ERROR )
 project( CALAMARES
-    VERSION 3.2.22
-    LANGUAGES C CXX )
+    VERSION 3.2.58
+    LANGUAGES C CXX
+)
 
-set( CALAMARES_VERSION_RC 1 )  # Set to 0 during release cycle, 1 during development
+set( CALAMARES_VERSION_RC 0 )  # Set to 0 during release cycle, 1 during development
+if( CALAMARES_VERSION_RC EQUAL 1 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
+    message( FATAL_ERROR "Do not build development versions in the source-directory." )
+endif()
 
 ### OPTIONS
 #
 option( INSTALL_CONFIG "Install configuration files" OFF )
 option( INSTALL_POLKIT "Install Polkit configuration" ON )
-option( BUILD_TESTING "Build the testing tree." ON )
+option( INSTALL_COMPLETION "Install shell completions" OFF )
+# Options for the calamares executable
+option( WITH_KF5Crash "Enable crash reporting with KCrash." ON )  # TODO:3.3: WITH->BUILD (this isn't an ABI thing)
+option( WITH_KF5DBus "Use DBus service for unique-application." OFF )  # TODO:3.3: WITH->BUILD
+# When adding WITH_* that affects the ABI offered by libcalamares,
+# also update libcalamares/CalamaresConfig.h.in
 option( WITH_PYTHON "Enable Python modules API (requires Boost.Python)." ON )
-option( WITH_PYTHONQT "Enable next generation Python modules API (experimental, requires PythonQt)." OFF )
-option( WITH_KF5Crash "Enable crash reporting with KCrash." ON )
+option( WITH_PYTHONQT "Enable Python view modules API (deprecated, requires PythonQt)." OFF )  # TODO:3.3: remove
+option( WITH_QML "Enable QML UI options." ON )
+#
+# Additional parts to build
+option( BUILD_SCHEMA_TESTING "Enable schema-validation-tests" ON )
+
+
+# Possible debugging flags are:
+#  - DEBUG_TIMEZONES draws latitude and longitude lines on the timezone
+#    widget and enables chatty debug logging, for dealing with the timezone
+#    location database.
+#  - DEBUG_FILESYSTEMS does extra logging and checking when looking at
+#    partition configuration. Lists known KPMCore FS types.
+#  - DEBUG_PARTITION_UNSAFE (see partition/CMakeLists.txt)
+#  - DEBUG_PARTITION_BAIL_OUT (see partition/CMakeLists.txt)
 
 
 ### USE_*
@@ -70,8 +93,14 @@ option( WITH_KF5Crash "Enable crash reporting with KCrash." ON )
 # all the implementations are enabled (this just means they are
 # **available** to `settings.conf`, not that they are used).
 #
-# Currently, only USE_services is in use (to pick only one of the two
-# modules, systemd or openrc).
+# To explicitly disable a set of modules, set USE_<foo>=none
+# (e.g. the literal string none), which won't match any of the
+# modules but is handled specially.
+#
+# The following USE_* functionalities are available:
+#  - *services* picks one of the two service-configuration modules,
+#    for either systemd or openrc. This defaults to empty so that
+#    **both** modules are available.
 set( USE_services "" CACHE STRING "Select the services module to use" )
 
 ### Calamares application info
@@ -96,26 +125,24 @@ set( CALAMARES_DESCRIPTION_SUMMARY
 #
 # When adding a new language, take care that it is properly loaded
 # by the translation framework. Languages with alternate scripts
-# (sr@latin in particular) may need special handling in CalamaresUtils.cpp.
-#
-# TODO: drop the es_ES translation from Transifex
+# (sr@latin in particular) or location (ca@valencia) need special
+# handling in libcalamares/locale/Translation.h .
 #
 # NOTE: move eo (Esperanto) to _ok once Qt can actually create a
-#       locale for it. (Qt 5.12.2 can, see check later on).
-# NOTE: update these lines by running txstats.py, or copy these four lines
-#       and prefix each variable name with "p", so that the automatic
-#       checks for new languages and misspelled ones are done (that is,
-#       copy these four lines to four backup lines, add "p", and then update
-#       the original four lines with the current translations).
+#       locale for it. (Qt 5.12.2 can, see Translation Status section).
+# NOTE: move ie (Interlingue) to _ok once Qt supports it.
+# NOTE: update these lines by running `txstats.py`, or for full automation
+#       `txstats.py -e`. See also
 #
-# Total 62 languages
-set( _tx_complete ca da fi_FI fr he hr ja lt sq tr_TR )
-set( _tx_good ast cs_CZ de es es_MX et gl hi hu id it_IT ko ml nl
-    pl pt_BR pt_PT ru sk zh_TW )
-set( _tx_ok ar as be bg el en_GB es_PR eu is mr nb ro sl sr
-    sr@latin sv th uk zh_CN )
-set( _tx_incomplete ca@valencia eo fa fr_CH gu kk kn lo mk ne_NP ur
-    uz )
+# Total 74 languages
+set( _tx_complete az az_AZ ca es fi_FI he hi hr ja lt pt_BR pt_PT
+    sq sv uk zh_TW )
+set( _tx_good as be ca@valencia cs_CZ da de fa fr fur it_IT ko ml
+    nl ru si sk tg tr_TR vi zh_CN )
+set( _tx_ok ar ast bg bn el en_GB es_MX et eu gl hu id is mr nb oc
+    pl ro sl sr sr@latin th )
+set( _tx_incomplete eo es_PR gu ie ja-Hira kk kn lo lv mk ne_NP
+    ta_IN te ur zh zh_HK )
 
 ### Required versions
 #
@@ -148,46 +175,40 @@ if(NOT CMAKE_VERSION VERSION_LESS "3.10.0")
     )
 endif()
 
+# CMake Modules
+include( CMakePackageConfigHelpers )
+include( CTest )
+include( FeatureSummary )
+
+# Calamares Modules
+include( CMakeColors )
 
 ### C++ SETUP
 #
-set( CMAKE_CXX_STANDARD 14 )
+set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )
+set( CMAKE_CXX_FLAGS                "${CMAKE_CXX_FLAGS} -Wall -Werror=return-type" )
+set( CMAKE_CXX_FLAGS_DEBUG          "-Og -g ${CMAKE_CXX_FLAGS_DEBUG}" )
+set( CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG" )
+set( CMAKE_CXX_FLAGS_RELEASE        "-O3 -DNDEBUG" )
+set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g" )
+
 set( CMAKE_C_STANDARD 99 )
 set( CMAKE_C_STANDARD_REQUIRED ON )
-
-# Debugging flags
-#
-# Possible debugging flags are:
-#  - DEBUG_TIMEZONES draws latitude and longitude lines on the timezone
-#    widget and enables chatty debug logging, for dealing with the timezone
-#    location database.
-#  - DEBUG_FILESYSTEMS does extra logging and checking when looking at
-#    partition configuration. Lists known KPMCore FS types.
-#
-# The flags listed here are enabled in Debug builds. By default, none
-# are **actually** listed, because they're for such specific scenarios.
-set( _enable_debug_flags
-    # DEBUG_TIMEZONES
-    # DEBUG_FILESYSTEMS
-)
-# Add those flags to the CXX flags in a suitable format.
-foreach( _edf ${_enable_debug_flags} )
-    string( APPEND CMAKE_CXX_FLAGS_DEBUG " -D${_edf}" )
-endforeach()
-
 set( CMAKE_C_FLAGS                  "${CMAKE_C_FLAGS} -Wall" )
+set( CMAKE_C_FLAGS_DEBUG            "-Og -g" )
+set( CMAKE_C_FLAGS_MINSIZEREL       "-Os -DNDEBUG" )
+set( CMAKE_C_FLAGS_RELEASE          "-O4 -DNDEBUG" )
+set( CMAKE_C_FLAGS_RELWITHDEBINFO   "-O2 -g" )
+
+set( CMAKE_SHARED_LINKER_FLAGS      "-Wl,--no-undefined -Wl,--fatal-warnings" )
+
 if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
     message( STATUS "Found Clang ${CMAKE_CXX_COMPILER_VERSION}, setting up Clang-specific compiler flags." )
-    set( CMAKE_C_FLAGS                  "${CMAKE_C_FLAGS} -Wall" )
-    set( CMAKE_C_FLAGS_DEBUG            "-g" )
-    set( CMAKE_C_FLAGS_MINSIZEREL       "-Os -DNDEBUG" )
-    set( CMAKE_C_FLAGS_RELEASE          "-O4 -DNDEBUG" )
-    set( CMAKE_C_FLAGS_RELWITHDEBINFO   "-O2 -g" )
 
     # Clang warnings: doing *everything* is counter-productive, since it warns
     # about things which we can't fix (e.g. C++98 incompatibilities, but
-    # Calamares is C++14).
+    # Calamares is C++17).
     foreach( CLANG_WARNINGS
         -Weverything
         -Wno-c++98-compat
@@ -199,40 +220,30 @@ if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
         -Wno-missing-prototypes
         -Wno-documentation-unknown-command
         -Wno-unknown-warning-option
-        -Werror=return-type
     )
         string( APPEND CMAKE_CXX_FLAGS " ${CLANG_WARNINGS}" )
     endforeach()
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOTREACHED='//' -DFALLTHRU='[[clang::fallthrough]]'")
+
+    # The dwarf-debugging flags are slightly different, too
+    string( APPEND CMAKE_CXX_FLAGS_DEBUG " -gdwarf" )
+    string( APPEND CMAKE_C_FLAGS_DEBUG " -gdwarf" )
 
     # Third-party code where we don't care so much about compiler warnings
     # (because it's uncomfortable to patch) get different flags; use
     #       mark_thirdparty_code( <file> [<file>...] )
     # to switch off warnings for those sources.
     set( SUPPRESS_3RDPARTY_WARNINGS "-Wno-everything" )
-    set( SUPPRESS_BOOST_WARNINGS " -Wno-zero-as-null-pointer-constant -Wno-disabled-macro-expansion" )
-
-    set( CMAKE_CXX_FLAGS_DEBUG          "-g ${CMAKE_CXX_FLAGS_DEBUG}" )
-    set( CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG" )
-    set( CMAKE_CXX_FLAGS_RELEASE        "-O3 -DNDEBUG" )
-    set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g" )
 
     set( CMAKE_TOOLCHAIN_PREFIX "llvm-" )
-
-    set( CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined" )
 
     # The path prefix is only relevant for CMake 3.16 and later, fixes #1286
     set( CMAKE_AUTOMOC_PATH_PREFIX OFF )
     set( CALAMARES_AUTOMOC_OPTIONS "-butils/moc-warnings.h" )
     set( CALAMARES_AUTOUIC_OPTIONS --include utils/moc-warnings.h )
 else()
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,--no-undefined" )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,--fatal-warnings -Wnon-virtual-dtor -Woverloaded-virtual -Werror=return-type" )
+    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wnon-virtual-dtor -Woverloaded-virtual" )
 
     set( SUPPRESS_3RDPARTY_WARNINGS "" )
-    set( SUPPRESS_BOOST_WARNINGS "" )
-
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOTREACHED='__builtin_unreachable();' -DFALLTHRU='/* */'" )
 endif()
 
 # Use mark_thirdparty_code() to reduce warnings from the compiler
@@ -253,20 +264,12 @@ if( CMAKE_COMPILER_IS_GNUCXX )
     endif()
 endif()
 
-include( FeatureSummary )
-include( CMakeColors )
-
 
 ### DEPENDENCIES
 #
-find_package( Qt5 ${QT_VERSION} CONFIG REQUIRED Concurrent Core Gui Widgets LinguistTools Svg Quick QuickWidgets )
-if( Qt5_VERSION VERSION_GREATER 5.12.1 )
-    # At least Qt 5.12.2 seems to support Esperanto in QLocale
-    if( "eo" IN_LIST _tx_incomplete )
-        message(STATUS "Esperanto support since Qt 5.12.2, enabling Esperanto locale")
-        list( REMOVE_ITEM _tx_incomplete "eo" )
-        list( APPEND _tx_ok "eo" )
-    endif()
+find_package( Qt5 ${QT_VERSION} CONFIG REQUIRED Concurrent Core Gui LinguistTools Network Svg Widgets )
+if( WITH_QML )
+    find_package( Qt5 ${QT_VERSION} CONFIG REQUIRED Quick QuickWidgets )
 endif()
 # Optional Qt parts
 find_package( Qt5DBus CONFIG )
@@ -300,7 +303,7 @@ if( ECM_FOUND )
     include(KDEInstallDirs)
 endif()
 
-find_package( KF5 QUIET COMPONENTS CoreAddons Crash )
+find_package( KF5 QUIET COMPONENTS CoreAddons Crash DBusAddons )
 set_package_properties(
     KF5::CoreAddons PROPERTIES
     TYPE REQUIRED
@@ -309,22 +312,63 @@ set_package_properties(
     PURPOSE "About Calamares"
 )
 if( NOT KF5Crash_FOUND )
+    if( WITH_KF5Crash )
+        message(WARNING "WITH_KF5Crash is set, but KF5::Crash is not available.")
+    endif()
     set( WITH_KF5Crash OFF )
 endif()
+if( NOT KF5DBusAddons_FOUND )
+    if( WITH_KF5DBus )
+        message(WARNING "WITH_KF5DBus is set, but KF5::DBusAddons is not available.")
+    endif()
+    set( WITH_KF5DBus OFF )
+endif()
 
-if( BUILD_TESTING )
-    enable_testing()
-endif ()
+# TODO:3.3: Use FindPython3 instead
+find_package( PythonInterp ${PYTHONLIBS_VERSION} )
+set_package_properties(
+    PythonInterp PROPERTIES
+    DESCRIPTION "Python 3 interpreter."
+    URL "https://python.org"
+    PURPOSE "Python 3 interpreter for certain tests."
+)
+
+set( _schema_explanation "" )
+if ( PYTHONINTERP_FOUND )
+    if ( BUILD_SCHEMA_TESTING )
+        # The configuration validator script has some dependencies,
+        # and if they are not installed, don't run. If errors out
+        # with exit(1) on missing dependencies.
+        if ( CALAMARES_CONFIGVALIDATOR_CHECKED )
+            set( _validator_deps ${CALAMARES_CONFIGVALIDATOR_RESULT} )
+        else()
+            exec_program( ${PYTHON_EXECUTABLE} ARGS "${CMAKE_SOURCE_DIR}/ci/configvalidator.py" -x RETURN_VALUE _validator_deps )
+            set( CALAMARES_CONFIGVALIDATOR_CHECKED TRUE CACHE INTERNAL "Dependencies for configvalidator checked" )
+            set( CALAMARES_CONFIGVALIDATOR_RESULT ${_validator_deps} CACHE INTERNAL "Result of configvalidator dependency check" )
+        endif()
+        # It should never succeed, but only returns 1 when the imports fail
+        if ( _validator_deps EQUAL 1 )
+            set( _schema_explanation " Missing dependencies for configvalidator.py." )
+            set( BUILD_SCHEMA_TESTING OFF )
+        endif()
+    endif()
+else()
+    # Can't run schema tests without Python3.
+    set( _schema_explanation " Missing Python3." )
+    set( BUILD_SCHEMA_TESTING OFF )
+endif()
+add_feature_info( yaml-schema BUILD_SCHEMA_TESTING "Validate YAML (config files) with schema.${_schema_explanation}" )
 
 find_package( PythonLibs ${PYTHONLIBS_VERSION} )
 set_package_properties(
     PythonLibs PROPERTIES
     DESCRIPTION "C interface libraries for the Python 3 interpreter."
-    URL "http://python.org"
+    URL "https://python.org"
     PURPOSE "Python 3 is used for Python job modules."
 )
 
 if ( PYTHONLIBS_FOUND )
+    # TODO:3.3: Require Boost + CMake; sort out Boost::Python
     # Since Boost provides CMake config files (starting with Boost 1.70.
     # or so) the mess that is the Calamares find code picks the wrong
     # bits. Suppress those CMake config files, as suggested by @jmrcpn
@@ -335,7 +379,7 @@ if ( PYTHONLIBS_FOUND )
         Boost PROPERTIES
         PURPOSE "Boost.Python is used for Python job modules."
     )
-
+    # TODO:3.3: Remove PythonQt support
     find_package( PythonQt )
     set_package_properties( PythonQt PROPERTIES
         DESCRIPTION "A Python embedding solution for Qt applications."
@@ -353,32 +397,34 @@ if( NOT PYTHONLIBS_FOUND OR NOT PYTHONQT_FOUND )
     set( WITH_PYTHONQT OFF )
 endif()
 
+# Now we know the state of the ABI-options, copy them into "Calamares_"
+# prefixed variables, to match how the variables would-be-named
+# when building out-of-tree.
+set(Calamares_WITH_PYTHON ${WITH_PYTHON})
+set(Calamares_WITH_PYTHONQT ${WITH_PYTHONQT})
+set(Calamares_WITH_QML ${WITH_QML})
+
 ### Transifex Translation status
 #
-# Construct language lists for use. If there are p_tx* variables,
-# then run an extra cmake-time check for consistency of the old
-# (p_tx*) and new (_tx*) lists.
+# Construct language lists for use. This massages the language lists
+# for use with older Qt (which does not support Esperanto) and checks
+# for some obvious error. The actual work of compiling translations
+# is done in the lang/ directory.
 #
-set( prev_tx ${p_tx_complete} ${p_tx_good} ${p_tx_ok} ${p_tx_incomplete} )
+if( Qt5_VERSION VERSION_GREATER 5.12.1 )
+    # At least Qt 5.12.2 seems to support Esperanto in QLocale
+    if( "eo" IN_LIST _tx_incomplete )
+        message(STATUS "Esperanto support since Qt 5.12.2, enabling Esperanto locale")
+        list( REMOVE_ITEM _tx_incomplete "eo" )
+        list( APPEND _tx_ok "eo" )
+    endif()
+endif()
+
 set( curr_tx ${_tx_complete} ${_tx_good} ${_tx_ok} ${_tx_incomplete} )
 set( tx_errors OFF )
-if ( prev_tx )
-    # Gone in new list
-    foreach( l ${prev_tx} )
-        list( FIND curr_tx ${l} p_l )
-        if( p_l EQUAL -1 )
-            message(WARNING "Language ${l} was present in previous translations and is now absent.")
-            set( tx_errors ON )
-        endif()
-    endforeach()
-
+if ( curr_tx )
     # New in list
     foreach( l ${curr_tx} )
-        list( FIND prev_tx ${l} p_l )
-        if( p_l EQUAL -1 )
-            message(WARNING "Language ${l} is new.")
-            set( tx_errors ON )
-        endif()
         set( p_l "lang/calamares_${l}.ts" )
         if( NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${p_l} )
             message(WARNING "Language ${l} has no .ts file yet.")
@@ -389,7 +435,6 @@ if ( prev_tx )
     unset( p_l )
     unset( l )
 endif()
-unset( prev_tx )
 unset( curr_tx )
 if( tx_errors )
     message( FATAL_ERROR "Translation warnings, see above." )
@@ -399,7 +444,6 @@ set( CALAMARES_TRANSLATION_LANGUAGES en ${_tx_complete} ${_tx_good} ${_tx_ok} )
 list( SORT CALAMARES_TRANSLATION_LANGUAGES )
 
 add_subdirectory( lang )  # i18n tools
-
 
 ### Example Distro
 #
@@ -461,22 +505,15 @@ if( CALAMARES_VERSION_TWEAK )
     set( CALAMARES_VERSION "${CALAMARES_VERSION}.${CALAMARES_VERSION_TWEAK}" )
 endif()
 set( CALAMARES_VERSION_SHORT "${CALAMARES_VERSION}" )
-if( CALAMARES_VERSION_RC )
-    set( CALAMARES_VERSION ${CALAMARES_VERSION}rc${CALAMARES_VERSION_RC} )
-endif()
 
-# additional info for non-release builds
+# Additional info for non-release builds. The "extended" version information
+# with date and git information (commit, dirty status) is used only
+# by CalamaresVersionX.h, which is included by consumers that need a full
+# version number with all that information; normal consumers can include
+# CalamaresVersion.h with more stable numbers.
 if( NOT BUILD_RELEASE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/" )
-    include( CMakeDateStamp )
-    set( CALAMARES_VERSION_DATE "${CMAKE_DATESTAMP_YEAR}${CMAKE_DATESTAMP_MONTH}${CMAKE_DATESTAMP_DAY}" )
-    if( CALAMARES_VERSION_DATE GREATER 0 )
-        set( CALAMARES_VERSION ${CALAMARES_VERSION}.${CALAMARES_VERSION_DATE} )
-    endif()
-
-    include( CMakeVersionSource )
-    if( CMAKE_VERSION_SOURCE )
-        set( CALAMARES_VERSION ${CALAMARES_VERSION}-${CMAKE_VERSION_SOURCE} )
-    endif()
+    include( ExtendedVersion )
+    extend_version( "${CALAMARES_VERSION}" OFF CALAMARES_VERSION_SHORT CALAMARES_VERSION )
 endif()
 
 # Special target for not-RC (e.g. might-be-release) builds.
@@ -489,7 +526,11 @@ if ( CALAMARES_VERSION_RC EQUAL 0 )
 endif()
 
 # enforce using constBegin, constEnd for const-iterators
-add_definitions( "-DQT_STRICT_ITERATORS" )
+add_definitions(
+    -DQT_STRICT_ITERATORS
+    -DQT_SHARED
+    -DQT_SHAREDPOINTER_TRACK_POINTERS
+)
 
 # set paths
 set( CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}" )
@@ -506,16 +547,10 @@ endif()
 # make predefined install dirs available everywhere
 include( GNUInstallDirs )
 
-# make uninstall support
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
-    IMMEDIATE @ONLY
-)
-
-# Early configure these files as we need them later on
-set( CALAMARES_CMAKE_DIR "${CMAKE_SOURCE_DIR}/CMakeModules" )
-set( CALAMARES_LIBRARIES calamares )
+# This is used by CalamaresAddLibrary; once Calamares is installed,
+# the CalamaresConfig.cmake module sets this variable to the IMPORTED
+# libraries for Calamares.
+set( Calamares_LIBRARIES calamares )
 
 add_subdirectory( src )
 
@@ -523,33 +558,41 @@ add_feature_info(Python ${WITH_PYTHON} "Python job modules")
 add_feature_info(PythonQt ${WITH_PYTHONQT} "Python view modules")
 add_feature_info(Config ${INSTALL_CONFIG} "Install Calamares configuration")
 add_feature_info(KCrash ${WITH_KF5Crash} "Crash dumps via KCrash")
+add_feature_info(KDBusAddons ${WITH_KF5DBus} "Unique-application via DBus")
 
-# Add all targets to the build-tree export set
+### CMake infrastructure installation
+#
+#
 set( CMAKE_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Calamares" CACHE PATH  "Installation directory for CMake files" )
 set( CMAKE_INSTALL_FULL_CMAKEDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_CMAKEDIR}" )
-export( TARGETS calamares
-    FILE "${PROJECT_BINARY_DIR}/CalamaresLibraryDepends.cmake" )
 
-# Export the package for use from the build-tree
-# (this registers the build-tree with a global CMake-registry)
 export( PACKAGE Calamares )
-
-# Create a CalamaresBuildTreeSettings.cmake file for the use from the build tree
-configure_file( CalamaresBuildTreeSettings.cmake.in "${PROJECT_BINARY_DIR}/CalamaresBuildTreeSettings.cmake" @ONLY )
-
-# Create the CalamaresConfig.cmake and CalamaresConfigVersion files
-file( RELATIVE_PATH CONF_REL_INCLUDE_DIR "${CMAKE_INSTALL_FULL_CMAKEDIR}" "${CMAKE_INSTALL_FULL_INCLUDEDIR}" )
-
-configure_file( CalamaresConfig.cmake.in "${PROJECT_BINARY_DIR}/CalamaresConfig.cmake" @ONLY )
-configure_file( CalamaresConfigVersion.cmake.in "${PROJECT_BINARY_DIR}/CalamaresConfigVersion.cmake" @ONLY )
-configure_file( CalamaresUse.cmake.in "${PROJECT_BINARY_DIR}/CalamaresUse.cmake" @ONLY )
+configure_package_config_file(
+    "CalamaresConfig.cmake.in"
+    "${PROJECT_BINARY_DIR}/CalamaresConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_CMAKEDIR}"
+    PATH_VARS
+        CMAKE_INSTALL_INCLUDEDIR
+        CMAKE_INSTALL_LIBDIR
+        CMAKE_INSTALL_DATADIR
+)
+write_basic_package_version_file(
+    ${PROJECT_BINARY_DIR}/CalamaresConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(
+    EXPORT Calamares
+    DESTINATION "${CMAKE_INSTALL_CMAKEDIR}"
+    FILE "CalamaresTargets.cmake"
+    NAMESPACE Calamares::
+)
 
 # Install the cmake files
 install(
     FILES
         "${PROJECT_BINARY_DIR}/CalamaresConfig.cmake"
         "${PROJECT_BINARY_DIR}/CalamaresConfigVersion.cmake"
-        "${PROJECT_BINARY_DIR}/CalamaresUse.cmake"
         "CMakeModules/CalamaresAddBrandingSubdirectory.cmake"
         "CMakeModules/CalamaresAddLibrary.cmake"
         "CMakeModules/CalamaresAddModuleSubdirectory.cmake"
@@ -557,49 +600,46 @@ install(
         "CMakeModules/CalamaresAddTest.cmake"
         "CMakeModules/CalamaresAddTranslations.cmake"
         "CMakeModules/CalamaresAutomoc.cmake"
+        "CMakeModules/CalamaresCheckModuleSelection.cmake"
         "CMakeModules/CMakeColors.cmake"
+        "CMakeModules/FindYAMLCPP.cmake"
     DESTINATION
         "${CMAKE_INSTALL_CMAKEDIR}"
 )
 
-# Install the export set for use with the install-tree
-install(
-    EXPORT
-        CalamaresLibraryDepends
-    DESTINATION
-        "${CMAKE_INSTALL_CMAKEDIR}"
-)
-
+### Miscellaneous installs
+#
+#
 if( INSTALL_CONFIG )
     install(
-        FILES
-            settings.conf
-        DESTINATION
-            share/calamares
+        FILES settings.conf
+        DESTINATION share/calamares
     )
 endif()
 
 if( INSTALL_POLKIT )
     install(
-        FILES
-            com.github.calamares.calamares.policy
-        DESTINATION
-          "${POLKITQT-1_POLICY_FILES_INSTALL_DIR}"
+        FILES com.github.calamares.calamares.policy
+        DESTINATION "${POLKITQT-1_POLICY_FILES_INSTALL_DIR}"
     )
 endif()
 
+if ( INSTALL_COMPLETION )
+    if( NOT CMAKE_INSTALL_BASHCOMPLETIONDIR )
+        set( CMAKE_INSTALL_BASHCOMPLETIONDIR "${CMAKE_INSTALL_DATADIR}/bash-completion/completions" )
+    endif()
+
+    install( FILES ${CMAKE_SOURCE_DIR}/data/completion/bash/calamares DESTINATION "${CMAKE_INSTALL_BASHCOMPLETIONDIR}" )
+endif()
+
 install(
-  FILES
-      calamares.desktop
-  DESTINATION
-      ${CMAKE_INSTALL_DATADIR}/applications
+  FILES calamares.desktop
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
 )
 
 install(
-    FILES
-        man/calamares.8
-    DESTINATION
-        ${CMAKE_INSTALL_MANDIR}/man8/
+    FILES man/calamares.8
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man8/
 )
 
 # uninstall target
@@ -637,3 +677,16 @@ feature_summary(
     DESCRIPTION "The following REQUIRED packages were not found:"
     QUIET_ON_EMPTY
 )
+
+### PACKAGING
+#
+# Note: most distro's will do distro-specific packaging rather than
+#       using CPack, and this duplicates information in the AppStream, too.
+# TODO:3.3 With newer CMake, move HOMEPAGE_URL to the project()call
+set(CPACK_PACKAGE_VENDOR calamares)
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A Linux system installer")
+set(CPACK_PACKAGE_DESCRIPTION "Calamares is a Linux system installer, intended for Linux distributions to use on their ISOs and other bootable media to install the distribution to the end-user's computer. Calamares can also be used as an OEM configuration tool. It is modular, extensible and highly-configurable for Linux distributions from all five major Linux families.")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://calamares.io")
+set(CPACK_PACKAGE_ICON "data/images/squid.png")
+
+include(CPack)

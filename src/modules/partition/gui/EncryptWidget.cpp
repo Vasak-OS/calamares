@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 
@@ -22,8 +13,26 @@
 
 #include "ui_EncryptWidget.h"
 
+#include "Branding.h"
 #include "utils/CalamaresUtilsGui.h"
 #include "utils/Retranslator.h"
+
+/** @brief Does this system support whole-disk encryption?
+ *
+ * Returns @c true if the system is likely to support encryption
+ * with sufficient performance to be usable. A machine that can't
+ * doe hardware-assisted AES is **probably** too slow, so we could
+ * warn the user that ticking the "encrypt system" box is a bad
+ * idea.
+ *
+ * Since we don't have an oracle that can answer that question,
+ * just pretend every system can do it.
+ */
+static inline bool
+systemSupportsEncryptionAcceptably()
+{
+    return true;
+}
 
 EncryptWidget::EncryptWidget( QWidget* parent )
     : QWidget( parent )
@@ -36,6 +45,18 @@ EncryptWidget::EncryptWidget( QWidget* parent )
     m_ui->m_passphraseLineEdit->hide();
     m_ui->m_confirmLineEdit->hide();
     m_ui->m_iconLabel->hide();
+    // TODO: this deserves better rendering, an icon or something, but that will
+    //       depend on having a non-bogus implementation of systemSupportsEncryptionAcceptably
+    if ( systemSupportsEncryptionAcceptably() )
+    {
+        m_ui->m_encryptionUnsupportedLabel->hide();
+    }
+    else
+    {
+        // This is really ugly, but the character is unicode "unlocked"
+        m_ui->m_encryptionUnsupportedLabel->setText( QStringLiteral( "🔓" ) );
+        m_ui->m_encryptionUnsupportedLabel->show();
+    }
 
     connect( m_ui->m_encryptCheckBox, &QCheckBox::stateChanged, this, &EncryptWidget::onCheckBoxStateChanged );
     connect( m_ui->m_passphraseLineEdit, &QLineEdit::textEdited, this, &EncryptWidget::onPassphraseEdited );
@@ -44,19 +65,22 @@ EncryptWidget::EncryptWidget( QWidget* parent )
     setFixedHeight( m_ui->m_passphraseLineEdit->height() );  // Avoid jumping up and down
     updateState();
 
-    CALAMARES_RETRANSLATE_SLOT( &EncryptWidget::retranslate )
+    CALAMARES_RETRANSLATE_SLOT( &EncryptWidget::retranslate );
 }
 
 
 void
-EncryptWidget::reset()
+EncryptWidget::reset( bool checkVisible )
 {
     m_ui->m_passphraseLineEdit->clear();
     m_ui->m_confirmLineEdit->clear();
 
     m_ui->m_encryptCheckBox->setChecked( false );
-}
 
+    m_ui->m_encryptCheckBox->setVisible( checkVisible );
+    m_ui->m_passphraseLineEdit->setVisible( !checkVisible );
+    m_ui->m_confirmLineEdit->setVisible( !checkVisible );
+}
 
 EncryptWidget::Encryption
 EncryptWidget::state() const
@@ -91,11 +115,41 @@ EncryptWidget::retranslate()
 }
 
 
+///@brief Give @p label the @p pixmap from the standard-pixmaps
+static void
+applyPixmap( QLabel* label, CalamaresUtils::ImageType pixmap )
+{
+    label->setFixedWidth( label->height() );
+    label->setPixmap( CalamaresUtils::defaultPixmap( pixmap, CalamaresUtils::Original, label->size() ) );
+}
+
 void
 EncryptWidget::updateState()
 {
+    if ( m_ui->m_passphraseLineEdit->isVisible() )
+    {
+        QString p1 = m_ui->m_passphraseLineEdit->text();
+        QString p2 = m_ui->m_confirmLineEdit->text();
+
+        if ( p1.isEmpty() && p2.isEmpty() )
+        {
+            applyPixmap( m_ui->m_iconLabel, CalamaresUtils::StatusWarning );
+            m_ui->m_iconLabel->setToolTip( tr( "Please enter the same passphrase in both boxes." ) );
+        }
+        else if ( p1 == p2 )
+        {
+            applyPixmap( m_ui->m_iconLabel, CalamaresUtils::StatusOk );
+            m_ui->m_iconLabel->setToolTip( QString() );
+        }
+        else
+        {
+            applyPixmap( m_ui->m_iconLabel, CalamaresUtils::StatusError );
+            m_ui->m_iconLabel->setToolTip( tr( "Please enter the same passphrase in both boxes." ) );
+        }
+    }
+
     Encryption newState;
-    if ( m_ui->m_encryptCheckBox->isChecked() )
+    if ( m_ui->m_encryptCheckBox->isChecked() || !m_ui->m_encryptCheckBox->isVisible() )
     {
         if ( !m_ui->m_passphraseLineEdit->text().isEmpty()
              && m_ui->m_passphraseLineEdit->text() == m_ui->m_confirmLineEdit->text() )
@@ -115,16 +169,8 @@ EncryptWidget::updateState()
     if ( newState != m_state )
     {
         m_state = newState;
-        emit stateChanged( m_state );
+        Q_EMIT stateChanged( m_state );
     }
-}
-
-///@brief Give @p label the @p pixmap from the standard-pixmaps
-static void
-applyPixmap( QLabel* label, CalamaresUtils::ImageType pixmap )
-{
-    label->setFixedWidth( label->height() );
-    label->setPixmap( CalamaresUtils::defaultPixmap( pixmap, CalamaresUtils::Original, label->size() ) );
 }
 
 void
@@ -133,24 +179,6 @@ EncryptWidget::onPassphraseEdited()
     if ( !m_ui->m_iconLabel->isVisible() )
     {
         m_ui->m_iconLabel->show();
-    }
-
-    QString p1 = m_ui->m_passphraseLineEdit->text();
-    QString p2 = m_ui->m_confirmLineEdit->text();
-
-    m_ui->m_iconLabel->setToolTip( QString() );
-    if ( p1.isEmpty() && p2.isEmpty() )
-    {
-        m_ui->m_iconLabel->clear();
-    }
-    else if ( p1 == p2 )
-    {
-        applyPixmap( m_ui->m_iconLabel, CalamaresUtils::Yes );
-    }
-    else
-    {
-        applyPixmap( m_ui->m_iconLabel, CalamaresUtils::No );
-        m_ui->m_iconLabel->setToolTip( tr( "Please enter the same passphrase in both boxes." ) );
     }
 
     updateState();

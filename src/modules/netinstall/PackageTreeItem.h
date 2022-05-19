@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright (c) 2017, Kyle Robbertze <kyle@aims.ac.za>
- *   Copyright 2017, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze <kyle@aims.ac.za>
+ *   SPDX-FileCopyrightText: 2017 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PACKAGETREEITEM_H
@@ -29,10 +20,23 @@ class PackageTreeItem : public QStandardItem
 public:
     using List = QList< PackageTreeItem* >;
 
+    ///@brief A tag class to distinguish package-from-map from group-from-map
+    struct PackageTag
+    {
+        PackageTreeItem* parent;
+    };
+    ///@brief A tag class to distinguish group-from-map from package-from-map
+    struct GroupTag
+    {
+        PackageTreeItem* parent;
+    };
+
     ///@brief A package (individual package)
     explicit PackageTreeItem( const QString& packageName, PackageTreeItem* parent = nullptr );
+    ///@brief A package (individual package with description)
+    explicit PackageTreeItem( const QVariantMap& packageData, PackageTag&& parent );
     ///@brief A group (sub-items and sub-groups are ignored)
-    explicit PackageTreeItem( const QVariantMap& groupData, PackageTreeItem* parent = nullptr );
+    explicit PackageTreeItem( const QVariantMap& groupData, GroupTag&& parent );
     ///@brief A root item, always selected, named "<root>"
     explicit PackageTreeItem();
     ~PackageTreeItem() override;
@@ -52,6 +56,7 @@ public:
     QString description() const { return m_description; }
     QString preScript() const { return m_preScript; }
     QString postScript() const { return m_postScript; }
+    QString source() const { return m_source; }
 
     /** @brief Is this item a group-item?
      *
@@ -120,6 +125,8 @@ public:
     void setSelected( Qt::CheckState isSelected );
     void setChildrenSelected( Qt::CheckState isSelected );
 
+    void removeChild( int row );
+
     /** @brief Update selectedness based on the children's states
      *
      * This only makes sense for groups, which might have packages
@@ -153,6 +160,7 @@ private:
     QString m_description;
     QString m_preScript;
     QString m_postScript;
+    QString m_source;
     bool m_isGroup = false;
     bool m_isCritical = false;
     bool m_isHidden = false;

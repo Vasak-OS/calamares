@@ -1,52 +1,76 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Bill Auger
+ *   SPDX-FileCopyrightText: 2019 Bill Auger
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "Paste.h"
 
+#include "Branding.h"
+#include "DllMacro.h"
 #include "utils/Logger.h"
+#include "utils/Units.h"
+#include "widgets/TranslationFix.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QFile>
-#include <QRegularExpression>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QTcpSocket>
 #include <QUrl>
+#include <QWidget>
 
-namespace CalamaresUtils
-{
+using namespace CalamaresUtils::Units;
 
-QString
-sendLogToPastebin( QObject* parent, const QString& ficheHost, quint16 fichePort )
+/** @brief Reads the logfile, returns its contents.
+ *
+ * Returns an empty QByteArray() on any kind of error.
+ */
+STATICTEST QByteArray
+logFileContents( const qint64 sizeLimitBytes )
 {
-    QString pasteUrlFmt = parent->tr( "Install log posted to:\n%1" );
-    QFile pasteSourceFile( Logger::logFile() );
+    if ( sizeLimitBytes > 0 )
+    {
+        cDebug() << "Log upload size limit was limited to" << sizeLimitBytes << "bytes";
+    }
+    if ( sizeLimitBytes == 0 )
+    {
+        cDebug() << "Log upload size is 0, upload disabled.";
+        return QByteArray();
+    }
+
+    const QString name = Logger::logFile();
+    QFile pasteSourceFile( name );
     if ( !pasteSourceFile.open( QIODevice::ReadOnly | QIODevice::Text ) )
     {
-        cError() << "Could not open log file";
-        return QString();
+        cWarning() << "Could not open log file" << name;
+        return QByteArray();
     }
-
-    QByteArray pasteData;
-    while ( !pasteSourceFile.atEnd() )
+    if ( sizeLimitBytes < 0 )
     {
-        pasteData += pasteSourceFile.readLine();
+        return pasteSourceFile.readAll();
     }
+    QFileInfo fi( pasteSourceFile );
+    if ( fi.size() > sizeLimitBytes )
+    {
+        cDebug() << "Only last" << sizeLimitBytes << "bytes of log file (sized" << fi.size() << "bytes) uploaded";
+        fi.refresh();  // Because we just wrote to the file with that cDebug() ^^
+        pasteSourceFile.seek( fi.size() - sizeLimitBytes );
+    }
+    return pasteSourceFile.read( sizeLimitBytes );
+}
 
+
+STATICTEST QString
+ficheLogUpload( const QByteArray& pasteData, const QUrl& serverUrl, QObject* parent )
+{
     QTcpSocket* socket = new QTcpSocket( parent );
-    socket->connectToHost( ficheHost, fichePort );
+    // 16 bits of port-number
+    socket->connectToHost( serverUrl.host(), quint16( serverUrl.port() ) );
 
     if ( !socket->waitForConnected() )
     {
@@ -55,7 +79,7 @@ sendLogToPastebin( QObject* parent, const QString& ficheHost, quint16 fichePort 
         return QString();
     }
 
-    cDebug() << "Connected to paste server";
+    cDebug() << "Connected to paste server" << serverUrl.host();
 
     socket->write( pasteData );
 
@@ -66,7 +90,7 @@ sendLogToPastebin( QObject* parent, const QString& ficheHost, quint16 fichePort 
         return QString();
     }
 
-    cDebug() << "Paste data written to paste server";
+    cDebug() << Logger::SubEntry << "Paste data written to paste server";
 
     if ( !socket->waitForReadyRead() )
     {
@@ -75,25 +99,100 @@ sendLogToPastebin( QObject* parent, const QString& ficheHost, quint16 fichePort 
         return QString();
     }
 
-    cDebug() << "Reading response from paste server";
-
-    char resp[ 1024 ];
-    resp[ 0 ] = '\0';
-    qint64 nBytesRead = socket->readLine( resp, 1024 );
+    cDebug() << Logger::SubEntry << "Reading response from paste server";
+    QByteArray responseText = socket->readLine( 1024 );
     socket->close();
 
-    QUrl pasteUrl = QUrl( QString( resp ).trimmed(), QUrl::StrictMode );
-    QString pasteUrlStr = pasteUrl.toString();
-    QRegularExpression pasteUrlRegex( "^http[s]?://" + ficheHost );
-    QString pasteUrlMsg = QString( pasteUrlFmt ).arg( pasteUrlStr );
-
-    if ( nBytesRead < 8 || !pasteUrl.isValid() || !pasteUrlRegex.match( pasteUrlStr ).hasMatch() )
+    QUrl pasteUrl = QUrl( QString( responseText ).trimmed(), QUrl::StrictMode );
+    if ( pasteUrl.isValid() && pasteUrl.host() == serverUrl.host() )
+    {
+        cDebug() << Logger::SubEntry << "Paste server results:" << pasteUrl;
+        return pasteUrl.toString();
+    }
+    else
     {
         cError() << "No data from paste server";
         return QString();
     }
-
-    cDebug() << "Paste server results:" << pasteUrlMsg;
-    return pasteUrlMsg;
 }
-}  // namespace CalamaresUtils
+
+QString
+CalamaresUtils::Paste::doLogUpload( QObject* parent )
+{
+    auto [ type, serverUrl, sizeLimitBytes ] = Calamares::Branding::instance()->uploadServer();
+    if ( !serverUrl.isValid() )
+    {
+        cWarning() << "Upload configured with invalid URL";
+        return QString();
+    }
+    if ( type == Calamares::Branding::UploadServerType::None )
+    {
+        // Early return to avoid reading the log file
+        return QString();
+    }
+    if ( sizeLimitBytes == 0 )
+    {
+        // Suggests that it is un-set in the config file
+        cWarning() << "Upload configured to send 0 bytes";
+        return QString();
+    }
+
+    QByteArray pasteData = logFileContents( sizeLimitBytes );
+    if ( pasteData.isEmpty() )
+    {
+        // An error has already been logged
+        return QString();
+    }
+
+    switch ( type )
+    {
+    case Calamares::Branding::UploadServerType::None:
+        cWarning() << "No upload configured.";
+        return QString();
+    case Calamares::Branding::UploadServerType::Fiche:
+        return ficheLogUpload( pasteData, serverUrl, parent );
+    }
+    return QString();
+}
+
+QString
+CalamaresUtils::Paste::doLogUploadUI( QWidget* parent )
+{
+    // These strings originated in the ViewManager class
+    QString pasteUrl = CalamaresUtils::Paste::doLogUpload( parent );
+    QString pasteUrlMessage;
+    if ( pasteUrl.isEmpty() )
+    {
+        pasteUrlMessage = QCoreApplication::translate( "Calamares::ViewManager",
+                                                       "The upload was unsuccessful. No web-paste was done." );
+    }
+    else
+    {
+        QClipboard* clipboard = QApplication::clipboard();
+        clipboard->setText( pasteUrl, QClipboard::Clipboard );
+
+        if ( clipboard->supportsSelection() )
+        {
+            clipboard->setText( pasteUrl, QClipboard::Selection );
+        }
+        QString pasteUrlFmt = QCoreApplication::translate( "Calamares::ViewManager",
+                                                           "Install log posted to\n\n%1\n\nLink copied to clipboard" );
+        pasteUrlMessage = pasteUrlFmt.arg( pasteUrl );
+    }
+
+    QMessageBox mb( QMessageBox::Critical,
+                    QCoreApplication::translate( "Calamares::ViewManager", "Install Log Paste URL" ),
+                    pasteUrlMessage,
+                    QMessageBox::Ok );
+    Calamares::fixButtonLabels( &mb );
+    mb.exec();
+    return pasteUrl;
+}
+
+
+bool
+CalamaresUtils::Paste::isEnabled()
+{
+    auto [ type, serverUrl, sizeLimitBytes ] = Calamares::Branding::instance()->uploadServer();
+    return type != Calamares::Branding::UploadServerType::None && sizeLimitBytes != 0;
+}

@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "core/BootLoaderModel.h"
@@ -27,6 +18,7 @@
 
 // KPMcore
 #include <kpmcore/core/device.h>
+#include <kpmcore/core/partition.h>
 
 #include <QComboBox>
 
@@ -49,7 +41,6 @@ BootLoaderModel::~BootLoaderModel() {}
 void
 BootLoaderModel::init( const QList< Device* >& devices )
 {
-    cDebug() << "BLM::init with" << devices.count() << "devices" << rowCount() << "rows";
     beginResetModel();
     blockSignals( true );
 
@@ -73,7 +64,6 @@ BootLoaderModel::createMbrItems()
 void
 BootLoaderModel::update()
 {
-    cDebug() << "BLM::update holds" << m_devices.count() << "devices" << rowCount() << "rows";
     beginResetModel();
     blockSignals( true );
     updateInternal();
@@ -159,28 +149,39 @@ BootLoaderModel::data( const QModelIndex& index, int role ) const
     return QStandardItemModel::data( index, role );
 }
 
-namespace Calamares
+std::pair< int, Device* >
+BootLoaderModel::findBootLoader( const QString& path ) const
 {
-int
-findBootloader( const QAbstractItemModel* model, const QString& path )
-{
-    for ( int i = 0; i < model->rowCount(); ++i )
+    int r = 0;
+    for ( Device* d : m_devices )
     {
-        const auto index = model->index( i, 0, QModelIndex() );
-        if ( !index.isValid() )
+        if ( d && d->deviceNode() == path )
         {
-            continue;
+            return std::make_pair( r, d );
         }
-        QVariant var = model->data( index, BootLoaderModel::BootLoaderPathRole );
-        if ( var.isValid() && var.toString() == path )
-        {
-            return i;
-        }
+        r++;
     }
 
-    return -1;
+    Partition* partition = KPMHelpers::findPartitionByMountPoint( m_devices, path );
+    if ( partition )
+    {
+        const QString partition_device_path = partition->deviceNode();
+        r = 0;
+        for ( Device* d : m_devices )
+        {
+            if ( d && d->deviceNode() == partition_device_path )
+            {
+                return std::make_pair( r, d );
+            }
+            r++;
+        }
+    }
+    return std::make_pair( -1, nullptr );
 }
 
+
+namespace Calamares
+{
 void
 restoreSelectedBootLoader( QComboBox& combo, const QString& path )
 {
@@ -191,12 +192,16 @@ restoreSelectedBootLoader( QComboBox& combo, const QString& path )
         return;
     }
 
-    int r = -1;
     if ( path.isEmpty() )
     {
+        cDebug() << "No path to restore, choosing default";
         combo.setCurrentIndex( 0 );
+        return;
     }
-    else if ( ( r = findBootloader( model, path ) ) >= 0 )
+
+    const BootLoaderModel* bmodel = qobject_cast< const BootLoaderModel* >( model );
+    int r = bmodel ? bmodel->findBootLoader( path ).first : -1;
+    if ( r >= 0 )
     {
         combo.setCurrentIndex( r );
     }

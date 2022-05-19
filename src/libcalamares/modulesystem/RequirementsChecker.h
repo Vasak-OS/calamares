@@ -1,19 +1,11 @@
-/* === This file is part of Calamares - <http://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef CALAMARES_REQUIREMENTSCHECKER_H
 #define CALAMARES_REQUIREMENTSCHECKER_H
@@ -29,6 +21,7 @@ namespace Calamares
 {
 
 class Module;
+class RequirementsModel;
 
 /** @brief A manager-class that checks all the module requirements
  *
@@ -40,15 +33,15 @@ class RequirementsChecker : public QObject
     Q_OBJECT
 
 public:
-    RequirementsChecker( QVector< Module* > modules, QObject* parent = nullptr );
-    virtual ~RequirementsChecker() override;
+    RequirementsChecker( QVector< Module* > modules, RequirementsModel* model, QObject* parent = nullptr );
+    ~RequirementsChecker() override;
 
 public Q_SLOTS:
     /// @brief Start checking all the requirements
     void run();
 
     /// @brief Called when requirements are reported by a module
-    void addCheckedRequirements( RequirementsList );
+    void addCheckedRequirements( Module* );
 
     /// @brief Called when all requirements have been checked
     void finished();
@@ -59,13 +52,6 @@ public Q_SLOTS:
 signals:
     /// @brief Human-readable progress message
     void requirementsProgress( const QString& );
-    /// @brief Requirements from a single module
-    void requirementsResult( RequirementsList );
-    /** @brief When all requirements are collected
-     *
-     * The argument indicates if all mandatory requirements are satisfied.
-     */
-    void requirementsComplete( bool );
     /// @brief Emitted after requirementsComplete
     void done();
 
@@ -75,7 +61,7 @@ private:
     using Watcher = QFutureWatcher< void >;
     QVector< Watcher* > m_watchers;
 
-    RequirementsList m_collectedRequirements;
+    RequirementsModel* m_model;
 
     QTimer* m_progressTimer;
     unsigned m_progressTimeouts;

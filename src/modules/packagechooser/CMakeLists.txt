@@ -1,3 +1,8 @@
+# === This file is part of Calamares - <https://calamares.io> ===
+#
+#   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
+#
 find_package( Qt5 COMPONENTS Core Gui Widgets REQUIRED )
 set( _extra_libraries "" )
 set( _extra_src "" )
@@ -5,11 +10,12 @@ set( _extra_src "" )
 ### OPTIONAL AppData XML support in PackageModel
 #
 #
+# TODO:3.3:WITH->BUILD (this doesn't affect the ABI offered by Calamares)
 option( WITH_APPDATA "Support appdata: items in PackageChooser (requires QtXml)" ON )
 if ( WITH_APPDATA )
     find_package(Qt5 COMPONENTS Xml)
     if ( Qt5Xml_FOUND )
-        add_definitions( -DHAVE_XML )
+        add_definitions( -DHAVE_APPDATA )
         list( APPEND _extra_libraries Qt5::Xml )
         list( APPEND _extra_src ItemAppData.cpp )
     endif()
@@ -39,6 +45,7 @@ calamares_add_plugin( packagechooser
     TYPE viewmodule
     EXPORT_MACRO PLUGINDLLEXPORT_PRO
     SOURCES
+        Config.cpp
         PackageChooserPage.cpp
         PackageChooserViewStep.cpp
         PackageModel.cpp
@@ -48,7 +55,6 @@ calamares_add_plugin( packagechooser
     UI
         page_package.ui
     LINK_PRIVATE_LIBRARIES
-        calamaresui
         ${_extra_libraries}
     SHARED_LIB
 )

@@ -1,30 +1,26 @@
 /*
- *   Copyright 2016, Luca Giambonini <almack@chakraos.org>
- *   Copyright 2016, Lisa Vitolo     <shainer@chakraos.org>
- *   Copyright 2017, Kyle Robbertze  <krobbertze@gmail.com>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
- *   Copyright 2017, Gabriel Craciunescu <crazy@frugalware.org>
+ *   SPDX-FileCopyrightText: 2016 Luca Giambonini <almack@chakraos.org>
+ *   SPDX-FileCopyrightText: 2016 Lisa Vitolo     <shainer@chakraos.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze  <krobbertze@gmail.com>
+ *   SPDX-FileCopyrightText: 2017-2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Gabriel Craciunescu <crazy@frugalware.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "Config.h"
 
+#include "LoaderQueue.h"
+
+#include "GlobalStorage.h"
+#include "JobQueue.h"
 #include "network/Manager.h"
+#include "packages/Globals.h"
 #include "utils/Logger.h"
-#include "utils/RAII.h"
-#include "utils/Yaml.h"
+#include "utils/Retranslator.h"
+#include "utils/Variant.h"
 
 #include <QNetworkReply>
 
@@ -32,9 +28,19 @@ Config::Config( QObject* parent )
     : QObject( parent )
     , m_model( new PackageModel( this ) )
 {
+    CALAMARES_RETRANSLATE_SLOT( &Config::retranslate );
 }
 
 Config::~Config() {}
+
+void
+Config::retranslate()
+{
+    emit statusChanged( status() );
+    emit sidebarLabelChanged( sidebarLabel() );
+    emit titleLabelChanged( titleLabel() );
+}
+
 
 QString
 Config::status() const
@@ -48,11 +54,13 @@ Config::status() const
     case Status::FailedBadData:
         return tr( "Network Installation. (Disabled: Received invalid groups data)" );
     case Status::FailedInternalError:
-        return tr( "Network Installation. (Disabled: internal error)" );
+        return tr( "Network Installation. (Disabled: Internal error)" );
     case Status::FailedNetworkError:
         return tr( "Network Installation. (Disabled: Unable to fetch package lists, check your network connection)" );
+    case Status::FailedNoData:
+        return tr( "Network Installation. (Disabled: No package list)" );
     }
-    NOTREACHED return QString();
+    __builtin_unreachable();
 }
 
 
@@ -63,80 +71,112 @@ Config::setStatus( Status s )
     emit statusChanged( status() );
 }
 
+QString
+Config::sidebarLabel() const
+{
+    return m_sidebarLabel ? m_sidebarLabel->get() : tr( "Package selection" );
+}
+
+QString
+Config::titleLabel() const
+{
+    return m_titleLabel ? m_titleLabel->get() : QString();
+}
+
+
 void
 Config::loadGroupList( const QVariantList& groupData )
 {
     m_model->setupModelData( groupData );
-    emit statusReady();
-}
-
-void
-Config::loadGroupList( const QUrl& url )
-{
-    if ( !url.isValid() )
+    if ( m_model->rowCount() < 1 )
     {
-        setStatus( Status::FailedBadConfiguration );
-    }
-
-    using namespace CalamaresUtils::Network;
-
-    cDebug() << "NetInstall loading groups from" << url;
-    QNetworkReply* reply = Manager::instance().asynchronousGet(
-        url,
-        RequestOptions( RequestOptions::FakeUserAgent | RequestOptions::FollowRedirect, std::chrono::seconds( 30 ) ) );
-
-    if ( !reply )
-    {
-        cDebug() << Logger::Continuation << "request failed immediately.";
-        setStatus( Status::FailedBadConfiguration );
+        cWarning() << "NetInstall groups data was empty.";
+        setStatus( Status::FailedNoData );
     }
     else
     {
-        m_reply = reply;
-        connect( reply, &QNetworkReply::finished, this, &Config::receivedGroupData );
+        setStatus( Status::Ok );
     }
 }
 
 void
-Config::receivedGroupData()
+Config::loadingDone()
 {
-    if ( !m_reply || !m_reply->isFinished() )
+    if ( m_queue )
     {
-        cWarning() << "NetInstall data called too early.";
-        setStatus( Status::FailedInternalError );
-        return;
+        m_queue->deleteLater();
+        m_queue = nullptr;
+    }
+    emit statusReady();
+}
+
+
+void
+Config::setConfigurationMap( const QVariantMap& configurationMap )
+{
+    setRequired( CalamaresUtils::getBool( configurationMap, "required", false ) );
+
+    // Get the translations, if any
+    bool bogus = false;
+    auto label = CalamaresUtils::getSubMap( configurationMap, "label", bogus );
+    // Use a different class name for translation lookup because the
+    // .. table of strings lives in NetInstallViewStep.cpp and moving them
+    // .. around is annoying for translators.
+    static const char className[] = "NetInstallViewStep";
+
+    if ( label.contains( "sidebar" ) )
+    {
+        m_sidebarLabel = new CalamaresUtils::Locale::TranslatedString( label, "sidebar", className );
+    }
+    if ( label.contains( "title" ) )
+    {
+        m_titleLabel = new CalamaresUtils::Locale::TranslatedString( label, "title", className );
     }
 
-    cDebug() << "NetInstall group data received" << m_reply->size() << "bytes from" << m_reply->url();
-
-    cqDeleter< QNetworkReply > d{ m_reply };
-
-    // If m_required is *false* then we still say we're ready
-    // even if the reply is corrupt or missing.
-    if ( m_reply->error() != QNetworkReply::NoError )
+    // Lastly, load the groups data
+    const QString key = QStringLiteral( "groupsUrl" );
+    const auto& groupsUrlVariant = configurationMap.value( key );
+    m_queue = new LoaderQueue( this );
+    if ( groupsUrlVariant.type() == QVariant::String )
     {
-        cWarning() << "unable to fetch netinstall package lists.";
-        cDebug() << Logger::SubEntry << "Netinstall reply error: " << m_reply->error();
-        cDebug() << Logger::SubEntry << "Request for url: " << m_reply->url().toString()
-                 << " failed with: " << m_reply->errorString();
-        setStatus( Status::FailedNetworkError );
-        return;
+        m_queue->append( SourceItem::makeSourceItem( groupsUrlVariant.toString(), configurationMap ) );
     }
-
-    QByteArray yamlData = m_reply->readAll();
-    try
+    else if ( groupsUrlVariant.type() == QVariant::List )
     {
-        YAML::Node groups = YAML::Load( yamlData.constData() );
-
-        if ( !groups.IsSequence() )
+        for ( const auto& s : groupsUrlVariant.toStringList() )
         {
-            cWarning() << "NetInstall groups data does not form a sequence.";
+            m_queue->append( SourceItem::makeSourceItem( s, configurationMap ) );
         }
-        loadGroupList( CalamaresUtils::yamlSequenceToVariant( groups ) );
     }
-    catch ( YAML::Exception& e )
+
+    setStatus( required() ? Status::FailedNoData : Status::Ok );
+    cDebug() << "Loading netinstall from" << m_queue->count() << "alternate sources.";
+    connect( m_queue, &LoaderQueue::done, this, &Config::loadingDone );
+    m_queue->load();
+}
+
+void
+Config::finalizeGlobalStorage( const Calamares::ModuleSystem::InstanceKey& key )
+{
+    auto packages = model()->getPackages();
+
+    // This netinstall module may add two sub-steps to the packageOperations,
+    // one for installing and one for try-installing.
+    QVariantList installPackages;
+    QVariantList tryInstallPackages;
+
+    for ( const auto& package : packages )
     {
-        CalamaresUtils::explainYamlException( e, yamlData, "netinstall groups data" );
-        setStatus( Status::FailedBadData );
+        if ( package->isCritical() )
+        {
+            installPackages.append( package->toOperation() );
+        }
+        else
+        {
+            tryInstallPackages.append( package->toOperation() );
+        }
     }
+
+    CalamaresUtils::Packages::setGSPackageAdditions(
+        Calamares::JobQueue::instance()->globalStorage(), key, installPackages, tryInstallPackages );
 }

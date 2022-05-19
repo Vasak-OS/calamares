@@ -1,31 +1,24 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "InteractiveTerminalPage.h"
 
-#include "viewpages/ViewStep.h"
-#include "utils/Retranslator.h"
 #include "utils/CalamaresUtilsGui.h"
 #include "utils/Logger.h"
+#include "utils/Retranslator.h"
+#include "viewpages/ViewStep.h"
+#include "widgets/TranslationFix.h"
 
-#include <KService>
-#include <KParts/kde_terminal_interface.h>
 #include <KParts/ReadOnlyPart>
+#include <KParts/kde_terminal_interface.h>
+#include <KService>
+#include <kcoreaddons_version.h>
 
 #include <QApplication>
 #include <QDir>
@@ -49,34 +42,45 @@ InteractiveTerminalPage::InteractiveTerminalPage( QWidget* parent )
 void
 InteractiveTerminalPage::errorKonsoleNotInstalled()
 {
-    QMessageBox::critical( this,
-                           tr( "Konsole not installed"),
-                           tr( "Please install KDE Konsole and try again!" ),
-                           QMessageBox::Ok );
+    QMessageBox mb( QMessageBox::Critical,
+                    tr( "Konsole not installed" ),
+                    tr( "Please install KDE Konsole and try again!" ),
+                    QMessageBox::Ok );
+    Calamares::fixButtonLabels( &mb );
+    mb.exec();
 }
 
 void
 InteractiveTerminalPage::onActivate()
 {
     if ( m_termHostWidget )
+    {
         return;
-    // For whatever reason, instead of simply linking against a library we
-    // need to do a runtime query to KService just to get a sodding terminal
-    // widget.
+    }
+
+#if KCOREADDONS_VERSION_MAJOR != 5
+#error Incompatible with not-KF5
+#endif
+#if KCOREADDONS_VERSION_MINOR >= 86
+    // 5.86 deprecated a bunch of KService and PluginFactory and related methods
+    auto md = KPluginMetaData::findPluginById( QString(), "konsolepart" );
+    if ( !md.isValid() )
+    {
+        errorKonsoleNotInstalled();
+        return;
+    }
+    auto* p = KPluginFactory::instantiatePlugin< KParts::ReadOnlyPart >( md, this ).plugin;
+#else
     KService::Ptr service = KService::serviceByDesktopName( "konsolepart" );
     if ( !service )
     {
-        // And all of this hoping the Konsole application is installed. If not,
-        // tough cookies.
         errorKonsoleNotInstalled();
-        return ;
+        return;
     }
 
     // Create one instance of konsolepart.
-    KParts::ReadOnlyPart* p =
-        service->createInstance< KParts::ReadOnlyPart >( this,
-                                                         this,
-                                                         {} );
+    KParts::ReadOnlyPart* p = service->createInstance< KParts::ReadOnlyPart >( this, this, {} );
+#endif
     if ( !p )
     {
         // One more opportunity for the loading operation to fail.
@@ -100,8 +104,6 @@ InteractiveTerminalPage::onActivate()
 
     m_termHostWidget = p->widget();
     m_layout->addWidget( m_termHostWidget );
-    cDebug() << "Part widget ought to be"
-             << m_termHostWidget->metaObject()->className();
 
     t->showShellInDir( QDir::home().path() );
     t->sendInput( QString( "%1\n" ).arg( m_command ) );
@@ -113,7 +115,5 @@ InteractiveTerminalPage::setCommand( const QString& command )
 {
     m_command = command;
     CALAMARES_RETRANSLATE(
-        m_headerLabel->setText( tr( "Executing script: &nbsp;<code>%1</code>" )
-                                .arg( m_command ) );
-    )
+        m_headerLabel->setText( tr( "Executing script: &nbsp;<code>%1</code>" ).arg( m_command ) ); );
 }

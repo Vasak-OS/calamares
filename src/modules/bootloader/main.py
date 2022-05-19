@@ -1,32 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
-#   Copyright 2014, Anke Boersma <demm@kaosx.us>
-#   Copyright 2014, Daniel Hillenbrand <codeworkx@bbqlinux.org>
-#   Copyright 2014, Benjamin Vaudour <benjamin.vaudour@yahoo.fr>
-#   Copyright 2014-2019, Kevin Kofler <kevin.kofler@chello.at>
-#   Copyright 2015-2018, Philip Mueller <philm@manjaro.org>
-#   Copyright 2016-2017, Teo Mrnjavac <teo@kde.org>
-#   Copyright 2017, Alf Gaida <agaida@siduction.org>
-#   Copyright 2017-2019, Adriaan de Groot <groot@kde.org>
-#   Copyright 2017, Gabriel Craciunescu <crazy@frugalware.org>
-#   Copyright 2017, Ben Green <Bezzy1999@hotmail.com>
+#   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+#   SPDX-FileCopyrightText: 2014 Anke Boersma <demm@kaosx.us>
+#   SPDX-FileCopyrightText: 2014 Daniel Hillenbrand <codeworkx@bbqlinux.org>
+#   SPDX-FileCopyrightText: 2014 Benjamin Vaudour <benjamin.vaudour@yahoo.fr>
+#   SPDX-FileCopyrightText: 2014-2019 Kevin Kofler <kevin.kofler@chello.at>
+#   SPDX-FileCopyrightText: 2015-2018 Philip Mueller <philm@manjaro.org>
+#   SPDX-FileCopyrightText: 2016-2017 Teo Mrnjavac <teo@kde.org>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@siduction.org>
+#   SPDX-FileCopyrightText: 2017-2019 Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2017 Gabriel Craciunescu <crazy@frugalware.org>
+#   SPDX-FileCopyrightText: 2017 Ben Green <Bezzy1999@hotmail.com>
+#   SPDX-FileCopyrightText: 2021 Neal Gompa <ngompa13@gmail.com>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import shutil
@@ -57,7 +49,6 @@ def get_uuid():
 
     :return:
     """
-    root_mount_point = libcalamares.globalstorage.value("rootMountPoint")
     partitions = libcalamares.globalstorage.value("partitions")
 
     for partition in partitions:
@@ -101,6 +92,50 @@ def get_kernel_line(kernel_type):
             return ""
 
 
+def get_zfs_root():
+    """
+    Looks in global storage to find the zfs root
+
+    :return: A string containing the path to the zfs root or None if it is not found
+    """
+
+    zfs = libcalamares.globalstorage.value("zfsDatasets")
+
+    if not zfs:
+        libcalamares.utils.warning("Failed to locate zfs dataset list")
+        return None
+
+    # Find the root dataset
+    for dataset in zfs:
+        try:
+            if dataset["mountpoint"] == "/":
+                return dataset["zpool"] + "/" + dataset["dsName"]
+        except KeyError:
+            # This should be impossible
+            libcalamares.utils.warning("Internal error handling zfs dataset")
+            raise
+
+    return None
+
+
+def is_btrfs_root(partition):
+    """ Returns True if the partition object refers to a btrfs root filesystem
+
+    :param partition: A partition map from global storage
+    :return: True if btrfs and root, False otherwise
+    """
+    return partition["mountPoint"] == "/" and partition["fs"] == "btrfs"
+
+
+def is_zfs_root(partition):
+    """ Returns True if the partition object refers to a zfs root filesystem
+
+    :param partition: A partition map from global storage
+    :return: True if zfs and root, False otherwise
+    """
+    return partition["mountPoint"] == "/" and partition["fs"] == "zfs"
+
+
 def create_systemd_boot_conf(install_path, efi_dir, uuid, entry, entry_name, kernel_type):
     """
     Creates systemd-boot configuration files based on given parameters.
@@ -142,6 +177,25 @@ def create_systemd_boot_conf(install_path, efi_dir, uuid, entry, entry_name, ker
                                   "root=/dev/mapper/"
                                   + partition["luksMapperName"]]
 
+    for partition in partitions:
+        # systemd-boot with a BTRFS root filesystem needs to be told abouut the root subvolume.
+        # If a btrfs root subvolume wasn't set, it means the root is directly on the partition
+        # and this option isn't needed
+        if is_btrfs_root(partition):
+            btrfs_root_subvolume = libcalamares.globalstorage.value("btrfsRootSubvolume")
+            if btrfs_root_subvolume:
+                kernel_params.append("rootflags=subvol=" + btrfs_root_subvolume)
+
+        # zfs needs to be told the location of the root dataset
+        if is_zfs_root(partition):
+            zfs_root_path = get_zfs_root()
+            if zfs_root_path is not None:
+                kernel_params.append("zfs=" + zfs_root_path)
+            else:
+                # Something is really broken if we get to this point
+                libcalamares.utils.warning("Internal error handling zfs dataset")
+                raise Exception("Internal zfs data missing, please contact your distribution")
+
     if cryptdevice_params:
         kernel_params.extend(cryptdevice_params)
     else:
@@ -170,7 +224,7 @@ def create_systemd_boot_conf(install_path, efi_dir, uuid, entry, entry_name, ker
 
     # Copy kernel and initramfs to a subdirectory of /efi partition
     files_dir = os.path.join(install_path + efi_dir, entry_name)
-    os.mkdir(files_dir)
+    os.makedirs(files_dir, exist_ok=True)
 
     kernel_path = install_path + kernel
     kernel_name = os.path.basename(kernel_path)
@@ -214,10 +268,166 @@ def create_loader(loader_path, entry):
             loader_file.write(line)
 
 
-def efi_label():
+class suffix_iterator(object):
+    """
+    Wrapper for one of the "generator" classes below to behave like
+    a proper Python iterator. The iterator is initialized with a
+    maximum number of attempts to generate a new suffix.
+    """
+    def __init__(self, attempts, generator):
+        self.generator = generator
+        self.attempts = attempts
+        self.counter = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.counter += 1
+        if self.counter <= self.attempts:
+            return self.generator.next()
+        raise StopIteration
+
+
+class serialEfi(object):
+    """
+    EFI Id generator that appends a serial number to the given name.
+    """
+    def __init__(self, name):
+        self.name = name
+        # So the first call to next() will bump it to 0
+        self.counter = -1
+
+    def next(self):
+        self.counter += 1
+        if self.counter > 0:
+            return "{!s}{!s}".format(self.name, self.counter)
+        else:
+            return self.name
+
+
+def render_in_base(value, base_values, length=-1):
+    """
+    Renders @p value in base-N, where N is the number of
+    items in @p base_values. When rendering, use the items
+    of @p base_values (e.g. use "0123456789" to get regular decimal
+    rendering, or "ABCDEFGHIJ" for letters-as-numbers 'encoding').
+
+    If length is positive, pads out to at least that long with
+    leading "zeroes", whatever base_values[0] is.
+    """
+    if value < 0:
+        raise ValueError("Cannot render negative values")
+    if len(base_values) < 2:
+        raise ValueError("Insufficient items for base-N rendering")
+    if length < 1:
+        length = 1
+    digits = []
+    base = len(base_values)
+    while value > 0:
+        place = value % base
+        value = value // base
+        digits.append(base_values[place])
+    while len(digits) < length:
+        digits.append(base_values[0])
+    return "".join(reversed(digits))
+
+
+class randomEfi(object):
+    """
+    EFI Id generator that appends a random 4-digit hex number to the given name.
+    """
+    def __init__(self, name):
+        self.name = name
+        # So the first call to next() will bump it to 0
+        self.counter = -1
+
+    def next(self):
+        self.counter += 1
+        if self.counter > 0:
+            import random
+            v = random.randint(0, 65535)  # 16 bits
+            return "{!s}{!s}".format(self.name, render_in_base(v, "0123456789ABCDEF", 4))
+        else:
+            return self.name
+
+
+class phraseEfi(object):
+    """
+    EFI Id generator that appends a random phrase to the given name.
+    """
+    words = ("Sun", "Moon", "Mars", "Soyuz", "Falcon", "Kuaizhou", "Gaganyaan")
+
+    def __init__(self, name):
+        self.name = name
+        # So the first call to next() will bump it to 0
+        self.counter = -1
+
+    def next(self):
+        self.counter += 1
+        if self.counter > 0:
+            import random
+            desired_length = 1 + self.counter // 5
+            v = random.randint(0, len(self.words) ** desired_length)
+            return "{!s}{!s}".format(self.name, render_in_base(v, self.words))
+        else:
+            return self.name
+
+
+def get_efi_suffix_generator(name):
+    """
+    Handle EFI bootloader Ids with @@<something>@@ for suffix-processing.
+    """
+    if "@@" not in name:
+        raise ValueError("Misplaced call to get_efi_suffix_generator, no @@")
+    parts = name.split("@@")
+    if len(parts) != 3:
+        raise ValueError("EFI Id {!r} is malformed".format(name))
+    if parts[2]:
+        # Supposed to be empty because the string ends with "@@"
+        raise ValueError("EFI Id {!r} is malformed".format(name))
+    if parts[1] not in ("SERIAL", "RANDOM", "PHRASE"):
+        raise ValueError("EFI suffix {!r} is unknown".format(parts[1]))
+
+    generator = None
+    if parts[1] == "SERIAL":
+        generator = serialEfi(parts[0])
+    elif parts[1] == "RANDOM":
+        generator = randomEfi(parts[0])
+    elif parts[1] == "PHRASE":
+        generator = phraseEfi(parts[0])
+    if generator is None:
+        raise ValueError("EFI suffix {!r} is unsupported".format(parts[1]))
+
+    return generator
+
+
+def change_efi_suffix(efi_directory, bootloader_id):
+    """
+    Returns a label based on @p bootloader_id that is usable within
+    @p efi_directory. If there is a @@<something>@@ suffix marker
+    in the given id, tries to generate a unique label.
+    """
+    if bootloader_id.endswith("@@"):
+        # Do 10 attempts with any suffix generator
+        g = suffix_iterator(10, get_efi_suffix_generator(bootloader_id))
+    else:
+        # Just one attempt
+        g = [bootloader_id]
+
+    for candidate_name in g:
+        if not os.path.exists(os.path.join(efi_directory, candidate_name)):
+            return candidate_name
+    return bootloader_id
+
+
+def efi_label(efi_directory):
+    """
+    Returns a sanitized label, possibly unique, that can be
+    used within @p efi_directory.
+    """
     if "efiBootloaderId" in libcalamares.job.configuration:
-        efi_bootloader_id = libcalamares.job.configuration[
-                                "efiBootloaderId"]
+        efi_bootloader_id = change_efi_suffix( efi_directory, libcalamares.job.configuration["efiBootloaderId"] )
     else:
         branding = libcalamares.globalstorage.value("branding")
         efi_bootloader_id = branding["bootloaderEntryName"]
@@ -235,6 +445,25 @@ def efi_word_size():
         # exposed to the userspace so we assume a 64 bit UEFI here
         efi_bitness = "64"
     return efi_bitness
+
+
+def efi_boot_next():
+    """
+    Tell EFI to definitely boot into the just-installed
+    system next time.
+    """
+    boot_mgr = libcalamares.job.configuration["efiBootMgr"]
+    boot_entry = None
+    efi_bootvars = subprocess.check_output([boot_mgr], text=True)
+    for line in efi_bootvars.split('\n'):
+        if not line:
+            continue
+        words = line.split()
+        if len(words) >= 2 and words[0] == "BootOrder:":
+            boot_entry = words[1].split(',')[0]
+            break
+    if boot_entry:
+        subprocess.call([boot_mgr, "-n", boot_entry])
 
 
 def install_systemd_boot(efi_directory):
@@ -271,6 +500,107 @@ def install_systemd_boot(efi_directory):
     create_loader(loader_path, distribution_translated)
 
 
+def get_grub_efi_parameters():
+    """
+    Returns a 3-tuple of suitable parameters for GRUB EFI installation,
+    depending on the host machine architecture. The return is
+        - target name
+        - grub.efi name
+        - boot.efi name
+    all three are strings. May return None if there is no suitable
+    set for the current machine. May return unsuitable values if the
+    host architecture is unknown (e.g. defaults to x86_64).
+    """
+    import platform
+    efi_bitness = efi_word_size()
+    cpu_type = platform.machine()
+
+    if efi_bitness == "32":
+        # Assume all 32-bitters are legacy x86
+        return ("i386-efi", "grubia32.efi", "bootia32.efi")
+    elif efi_bitness == "64" and cpu_type == "aarch64":
+        return ("arm64-efi", "grubaa64.efi", "bootaa64.efi")
+    elif efi_bitness == "64" and cpu_type == "loongarch64":
+        return ("loongarch64-efi", "grubloongarch64.efi", "bootloongarch64.efi")
+    elif efi_bitness == "64":
+        # If it's not ARM, must by AMD64
+        return ("x86_64-efi", "grubx64.efi", "bootx64.efi")
+    libcalamares.utils.warning("Could not find GRUB parameters for bits {b} and cpu {c}".format(b=repr(efi_bitness), c=repr(cpu_type)))
+    return None
+
+
+def run_grub_mkconfig(partitions, output_file):
+    """
+    Runs grub-mkconfig in the target environment
+
+    :param partitions: The partitions list from global storage
+    :param output_file: A string containing the path to the generating grub config file
+    :return:
+    """
+
+    # zfs needs an environment variable set for grub-mkconfig
+    if any([is_zfs_root(partition) for partition in partitions]):
+        check_target_env_call(["sh", "-c", "ZPOOL_VDEV_NAME_PATH=1 " +
+                               libcalamares.job.configuration["grubMkconfig"] + " -o " + output_file])
+    else:
+        # The input file /etc/default/grub should already be filled out by the
+        # grubcfg job module.
+        check_target_env_call([libcalamares.job.configuration["grubMkconfig"], "-o", output_file])
+
+
+def run_grub_install(fw_type, partitions, efi_directory):
+    """
+    Runs grub-install in the target environment
+
+    :param fw_type: A string which is "efi" for UEFI installs.  Any other value results in a BIOS install
+    :param partitions: The partitions list from global storage
+    :param efi_directory: The path of the efi directory relative to the root of the install
+    :return:
+    """
+
+    is_zfs = any([is_zfs_root(partition) for partition in partitions])
+
+    # zfs needs an environment variable set for grub
+    if is_zfs:
+        check_target_env_call(["sh", "-c", "echo ZPOOL_VDEV_NAME_PATH=1 >> /etc/environment"])
+
+    if fw_type == "efi":
+        assert efi_directory is not None
+        efi_bootloader_id = efi_label(efi_directory)
+        efi_target, efi_grub_file, efi_boot_file = get_grub_efi_parameters()
+
+        if is_zfs:
+            check_target_env_call(["sh", "-c", "ZPOOL_VDEV_NAME_PATH=1 " + libcalamares.job.configuration["grubInstall"]
+                                   + " --target=" + efi_target + " --efi-directory=" + efi_directory
+                                   + " --bootloader-id=" + efi_bootloader_id + " --force"])
+        else:
+            check_target_env_call([libcalamares.job.configuration["grubInstall"],
+                                   "--target=" + efi_target,
+                                   "--efi-directory=" + efi_directory,
+                                   "--bootloader-id=" + efi_bootloader_id,
+                                   "--force"])
+    else:
+        assert efi_directory is None
+        if libcalamares.globalstorage.value("bootLoader") is None:
+            return
+
+        boot_loader = libcalamares.globalstorage.value("bootLoader")
+        if boot_loader["installPath"] is None:
+            return
+
+        if is_zfs:
+            check_target_env_call(["sh", "-c", "ZPOOL_VDEV_NAME_PATH=1 "
+                                   + libcalamares.job.configuration["grubInstall"]
+                                   + " --target=i386-pc --recheck --force "
+                                   + boot_loader["installPath"]])
+        else:
+            check_target_env_call([libcalamares.job.configuration["grubInstall"],
+                                   "--target=i386-pc",
+                                   "--recheck",
+                                   "--force",
+                                   boot_loader["installPath"]])
+
+
 def install_grub(efi_directory, fw_type):
     """
     Installs grub as bootloader, either in pc or efi mode.
@@ -278,6 +608,12 @@ def install_grub(efi_directory, fw_type):
     :param efi_directory:
     :param fw_type:
     """
+    # get the partition from global storage
+    partitions = libcalamares.globalstorage.value("partitions")
+    if not partitions:
+        libcalamares.utils.warning(_("Failed to install grub, no partitions defined in global storage"))
+        return
+
     if fw_type == "efi":
         libcalamares.utils.debug("Bootloader: grub (efi)")
         install_path = libcalamares.globalstorage.value("rootMountPoint")
@@ -286,23 +622,11 @@ def install_grub(efi_directory, fw_type):
         if not os.path.isdir(install_efi_directory):
             os.makedirs(install_efi_directory)
 
-        efi_bootloader_id = efi_label()
-        efi_bitness = efi_word_size()
+        efi_bootloader_id = efi_label(efi_directory)
 
-        if efi_bitness == "32":
-            efi_target = "i386-efi"
-            efi_grub_file = "grubia32.efi"
-            efi_boot_file = "bootia32.efi"
-        elif efi_bitness == "64":
-            efi_target = "x86_64-efi"
-            efi_grub_file = "grubx64.efi"
-            efi_boot_file = "bootx64.efi"
+        efi_target, efi_grub_file, efi_boot_file = get_grub_efi_parameters()
 
-        check_target_env_call([libcalamares.job.configuration["grubInstall"],
-                               "--target=" + efi_target,
-                               "--efi-directory=" + efi_directory,
-                               "--bootloader-id=" + efi_bootloader_id,
-                               "--force"])
+        run_grub_install(fw_type, partitions, efi_directory)
 
         # VFAT is weird, see issue CAL-385
         install_efi_directory_firmware = (vfat_correct_case(
@@ -321,51 +645,36 @@ def install_grub(efi_directory, fw_type):
             os.makedirs(install_efi_boot_directory)
 
         # Workaround for some UEFI firmwares
-        FALLBACK = "installEFIFallback"
-        libcalamares.utils.debug("UEFI Fallback: " + str(libcalamares.job.configuration.get(FALLBACK, "<unset>")))
-        if libcalamares.job.configuration.get(FALLBACK, True):
+        fallback = "installEFIFallback"
+        libcalamares.utils.debug("UEFI Fallback: " + str(libcalamares.job.configuration.get(fallback, "<unset>")))
+        if libcalamares.job.configuration.get(fallback, True):
             libcalamares.utils.debug("  .. installing '{!s}' fallback firmware".format(efi_boot_file))
             efi_file_source = os.path.join(install_efi_directory_firmware,
-                                        efi_bootloader_id,
-                                        efi_grub_file)
-            efi_file_target = os.path.join(install_efi_boot_directory,
-                                        efi_boot_file)
+                                           efi_bootloader_id,
+                                           efi_grub_file)
+            efi_file_target = os.path.join(install_efi_boot_directory, efi_boot_file)
 
             shutil.copy2(efi_file_source, efi_file_target)
     else:
         libcalamares.utils.debug("Bootloader: grub (bios)")
-        if libcalamares.globalstorage.value("bootLoader") is None:
-            return
+        run_grub_install(fw_type, partitions, None)
 
-        boot_loader = libcalamares.globalstorage.value("bootLoader")
-        if boot_loader["installPath"] is None:
-            return
-
-        check_target_env_call([libcalamares.job.configuration["grubInstall"],
-                               "--target=i386-pc",
-                               "--recheck",
-                               "--force",
-                               boot_loader["installPath"]])
-
-    # The input file /etc/default/grub should already be filled out by the
-    # grubcfg job module.
-    check_target_env_call([libcalamares.job.configuration["grubMkconfig"],
-                           "-o", libcalamares.job.configuration["grubCfg"]])
+    run_grub_mkconfig(partitions, libcalamares.job.configuration["grubCfg"])
 
 
 def install_secureboot(efi_directory):
     """
     Installs the secureboot shim in the system by calling efibootmgr.
     """
-    efi_bootloader_id = efi_label()
+    efi_bootloader_id = efi_label(efi_directory)
 
     install_path = libcalamares.globalstorage.value("rootMountPoint")
     install_efi_directory = install_path + efi_directory
 
     if efi_word_size() == "64":
-        install_efi_bin = "shim64.efi"
-    else:
-        install_efi_bin = "shim.efi"
+        install_efi_bin = "shimx64.efi"
+    elif efi_word_size() == "32":
+        install_efi_bin = "shimia32.efi"
 
     # Copied, roughly, from openSUSE's install script,
     # and pythonified. *disk* is something like /dev/sda,
@@ -402,6 +711,8 @@ def install_secureboot(efi_directory):
         "-d", efi_disk,
         "-p", efi_partition_number,
         "-l", install_efi_directory + "/" + install_efi_bin])
+
+    efi_boot_next()
 
     # The input file /etc/default/grub should already be filled out by the
     # grubcfg job module.
@@ -462,6 +773,14 @@ def run():
             libcalamares.utils.warning( "EFI system, but nothing mounted on {!s}".format(efi_system_partition) )
             return None
 
-    prepare_bootloader(fw_type)
+    try:
+        prepare_bootloader(fw_type)
+    except subprocess.CalledProcessError as e:
+        libcalamares.utils.warning(str(e))
+        libcalamares.utils.debug("stdout:" + str(e.stdout))
+        libcalamares.utils.debug("stderr:" + str(e.stderr))
+        return (_("Bootloader installation error"),
+                _("The bootloader could not be installed. The installation command <pre>{!s}</pre> returned error code {!s}.")
+                .format(e.cmd, e.returncode))
 
     return None

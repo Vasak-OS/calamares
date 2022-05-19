@@ -1,26 +1,55 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright (c) 2017, Kyle Robbertze <kyle@aims.ac.za>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze <kyle@aims.ac.za>
+ *   SPDX-FileCopyrightText: 2017-2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "PackageModel.h"
 
+#include "utils/Logger.h"
 #include "utils/Variant.h"
 #include "utils/Yaml.h"
+
+/// Recursive helper for setSelections()
+static void
+setSelections( const QStringList& selectNames, PackageTreeItem* item )
+{
+    for ( int i = 0; i < item->childCount(); i++ )
+    {
+        auto* child = item->child( i );
+        setSelections( selectNames, child );
+    }
+    if ( item->isGroup() && selectNames.contains( item->name() ) )
+    {
+        item->setSelected( Qt::CheckState::Checked );
+    }
+}
+
+/** @brief Collects all the "source" values from @p groupList
+ *
+ * Iterates over @p groupList and returns all nonempty "source"
+ * values from the maps.
+ *
+ */
+static QStringList
+collectSources( const QVariantList& groupList )
+{
+    QStringList sources;
+    for ( const QVariant& group : groupList )
+    {
+        QVariantMap groupMap = group.toMap();
+        if ( !groupMap[ "source" ].toString().isEmpty() )
+        {
+            sources.append( groupMap[ "source" ].toString() );
+        }
+    }
+
+    return sources;
+}
 
 PackageModel::PackageModel( QObject* parent )
     : QAbstractItemModel( parent )
@@ -178,6 +207,15 @@ PackageModel::headerData( int section, Qt::Orientation orientation, int role ) c
     return QVariant();
 }
 
+void
+PackageModel::setSelections( const QStringList& selectNames )
+{
+    if ( m_rootItem )
+    {
+        ::setSelections( selectNames, m_rootItem );
+    }
+}
+
 PackageTreeItem::List
 PackageModel::getPackages() const
 {
@@ -232,33 +270,73 @@ PackageModel::setupModelData( const QVariantList& groupList, PackageTreeItem* pa
             continue;
         }
 
-        PackageTreeItem* item = new PackageTreeItem( groupMap, parent );
+        PackageTreeItem* item = new PackageTreeItem( groupMap, PackageTreeItem::GroupTag { parent } );
         if ( groupMap.contains( "selected" ) )
         {
             item->setSelected( CalamaresUtils::getBool( groupMap, "selected", false ) ? Qt::Checked : Qt::Unchecked );
         }
         if ( groupMap.contains( "packages" ) )
         {
-            for ( const auto& packageName : groupMap.value( "packages" ).toStringList() )
+            for ( const auto& packageName : groupMap.value( "packages" ).toList() )
             {
-                item->appendChild( new PackageTreeItem( packageName, item ) );
+                if ( packageName.type() == QVariant::String )
+                {
+                    item->appendChild( new PackageTreeItem( packageName.toString(), item ) );
+                }
+                else
+                {
+                    QVariantMap m = packageName.toMap();
+                    if ( !m.isEmpty() )
+                    {
+                        item->appendChild( new PackageTreeItem( m, PackageTreeItem::PackageTag { item } ) );
+                    }
+                }
+            }
+            if ( !item->childCount() )
+            {
+                cWarning() << "*packages* under" << item->name() << "is empty.";
             }
         }
         if ( groupMap.contains( "subgroups" ) )
         {
+            bool haveWarned = false;
+            const auto& subgroupValue = groupMap.value( "subgroups" );
+            if ( !subgroupValue.canConvert( QVariant::List ) )
+            {
+                cWarning() << "*subgroups* under" << item->name() << "is not a list.";
+                haveWarned = true;
+            }
+
             QVariantList subgroups = groupMap.value( "subgroups" ).toList();
             if ( !subgroups.isEmpty() )
             {
                 setupModelData( subgroups, item );
                 // The children might be checked while the parent isn't (yet).
                 // Children are added to their parent (below) without affecting
-                // the checked-state -- do it manually.
-                item->updateSelected();
+                // the checked-state -- do it manually. Items with subgroups
+                // but no children have only hidden children -- those get
+                // handled specially.
+                if ( item->childCount() > 0 )
+                {
+                    item->updateSelected();
+                }
+            }
+            else
+            {
+                if ( !haveWarned )
+                {
+                    cWarning() << "*subgroups* list under" << item->name() << "is empty.";
+                }
             }
         }
         if ( item->isHidden() )
         {
             m_hiddenItems.append( item );
+            if ( !item->isSelected() )
+            {
+                cWarning() << "Item" << ( item->parentItem() ? item->parentItem()->name() : QString() ) << '.'
+                           << item->name() << "is hidden, but not selected.";
+            }
         }
         else
         {
@@ -271,9 +349,43 @@ PackageModel::setupModelData( const QVariantList& groupList, PackageTreeItem* pa
 void
 PackageModel::setupModelData( const QVariantList& l )
 {
-    emit beginResetModel();
+    beginResetModel();
     delete m_rootItem;
     m_rootItem = new PackageTreeItem();
     setupModelData( l, m_rootItem );
-    emit endResetModel();
+    endResetModel();
+}
+
+void
+PackageModel::appendModelData( const QVariantList& groupList )
+{
+    if ( m_rootItem )
+    {
+        beginResetModel();
+
+        const QStringList sources = collectSources( groupList );
+
+        if ( !sources.isEmpty() )
+        {
+            // Prune any existing data from the same source
+            QList< int > removeList;
+            for ( int i = 0; i < m_rootItem->childCount(); i++ )
+            {
+                PackageTreeItem* child = m_rootItem->child( i );
+                if ( sources.contains( child->source() ) )
+                {
+                    removeList.insert( 0, i );
+                }
+            }
+            for ( const int& item : qAsConst( removeList ) )
+            {
+                m_rootItem->removeChild( item );
+            }
+        }
+
+        // Add the new data to the model
+        setupModelData( groupList, m_rootItem );
+
+        endResetModel();
+    }
 }

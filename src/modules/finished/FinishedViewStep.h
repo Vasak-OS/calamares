@@ -1,32 +1,21 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef FINISHEDVIEWSTEP_H
 #define FINISHEDVIEWSTEP_H
 
-#include <QObject>
-
+#include "DllMacro.h"
 #include "utils/PluginFactory.h"
 #include "viewpages/ViewStep.h"
 
-#include "DllMacro.h"
-
+class Config;
 class FinishedPage;
 
 class PLUGINDLLEXPORT FinishedViewStep : public Calamares::ViewStep
@@ -34,18 +23,8 @@ class PLUGINDLLEXPORT FinishedViewStep : public Calamares::ViewStep
     Q_OBJECT
 
 public:
-    enum class RestartMode
-    {
-        Never=0,         ///< @brief Don't show button, just exit
-        UserUnchecked,   ///< @brief Show button, starts unchecked
-        UserChecked,     ///< @brief Show button, starts checked
-        Always           ///< @brief Show button, can't change, checked
-    };
-    /// @brief Returns the config-name of the given restart-mode @p m
-    static QString modeName( RestartMode m );
-
     explicit FinishedViewStep( QObject* parent = nullptr );
-    virtual ~FinishedViewStep() override;
+    ~FinishedViewStep() override;
 
     QString prettyName() const override;
 
@@ -63,20 +42,9 @@ public:
 
     void setConfigurationMap( const QVariantMap& configurationMap ) override;
 
-public slots:
-    void onInstallationFailed( const QString& message, const QString& details );
-
 private:
+    Config* m_config;
     FinishedPage* m_widget;
-
-    /**
-     * @brief At the end of installation (when this step is activated),
-     *      send a desktop notification via DBus that the install is done.
-     */
-    void sendNotification();
-
-    bool installFailed;
-    bool m_notifyOnFinished;
 };
 
 CALAMARES_PLUGIN_FACTORY_DECLARATION( FinishedViewStepFactory )

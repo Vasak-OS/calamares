@@ -1,3 +1,9 @@
+# === This file is part of Calamares - <https://calamares.io> ===
+#
+#   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
+#
+
 # Configuration for hostinfo
 #
 # There isn't anything to configure for the hostinfo module.
@@ -22,8 +28,6 @@ calamares_add_plugin( hostinfo
     EXPORT_MACRO PLUGINDLLEXPORT_PRO
     SOURCES
         HostInfoJob.cpp
-    LINK_PRIVATE_LIBRARIES
-        calamares
     SHARED_LIB
     NO_CONFIG
 )
@@ -38,5 +42,5 @@ calamares_add_test(
         Tests.cpp
         HostInfoJob.cpp
     LIBRARIES
-        yamlcpp
+        yamlcpp::yamlcpp
 )

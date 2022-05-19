@@ -1,30 +1,23 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014,      Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014      Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef KPMHELPERS_H
 #define KPMHELPERS_H
 
-// KPMcore
+#include "Job.h"
+
 #include <kpmcore/core/partitiontable.h>
 #include <kpmcore/fs/filesystem.h>
+#include <kpmcore/ops/operation.h>
+#include <kpmcore/util/report.h>
 
-// Qt
 #include <QList>
 
 #include <functional>
@@ -64,6 +57,7 @@ Partition* createNewPartition( PartitionNode* parent,
                                const Device& device,
                                const PartitionRole& role,
                                FileSystem::Type fsType,
+                               const QString& fsLabel,
                                qint64 firstSector,
                                qint64 lastSector,
                                PartitionTable::Flags flags );
@@ -72,12 +66,33 @@ Partition* createNewEncryptedPartition( PartitionNode* parent,
                                         const Device& device,
                                         const PartitionRole& role,
                                         FileSystem::Type fsType,
+                                        const QString& fsLabel,
                                         qint64 firstSector,
                                         qint64 lastSector,
                                         const QString& passphrase,
                                         PartitionTable::Flags flags );
 
 Partition* clonePartition( Device* device, Partition* partition );
+
+int updateLuksDevice( Partition* partition, const QString& passphrase );
+
+/** @brief Return a result for an @p operation
+ *
+ * Executes the operation, and if successful, returns a success result.
+ * Otherwise returns an error using @p failureMessage as the primary part
+ * of the error, and details obtained from the operation.
+ */
+Calamares::JobResult execute( Operation& operation, const QString& failureMessage );
+/** @brief Return a result for an @p operation
+ *
+ * It's acceptable to use an rvalue: the operation-running is the effect
+ * you're interested in, rather than keeping the temporary around.
+ */
+static inline Calamares::JobResult
+execute( Operation&& operation, const QString& failureMessage )
+{
+    return execute( operation, failureMessage );
+}
 
 }  // namespace KPMHelpers
 

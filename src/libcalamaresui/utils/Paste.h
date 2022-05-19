@@ -1,37 +1,43 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Bill Auger
+ *   SPDX-FileCopyrightText: 2019 Bill Auger
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef UTILS_PASTE_H
 #define UTILS_PASTE_H
 
-#include <qglobal.h>  // for quint16
+#include <QString>
 
 class QObject;
-class QString;
+class QWidget;
 
 namespace CalamaresUtils
 {
-
+namespace Paste
+{
 /** @brief Send the current log file to a pastebin
  *
  * Returns the (string) URL that the pastebin gives us.
  */
-QString sendLogToPastebin( QObject* parent, const QString& ficheHost, quint16 fichePort );
+QString doLogUpload( QObject* parent );
+
+/** @brief Send the current log file to a pastebin
+ *
+ * As doLogUpload(), but also sets the clipboard and displays
+ * a message saying it's been done.
+ */
+QString doLogUploadUI( QWidget* parent );
+
+/** @brief Is paste enabled?
+ *
+ * Checks the branding instance if paste can be done.
+ */
+bool isEnabled();
+}  // namespace Paste
 
 }  // namespace CalamaresUtils
 

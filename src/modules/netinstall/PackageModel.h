@@ -1,21 +1,11 @@
-
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright (c) 2017, Kyle Robbertze <kyle@aims.ac.za>
- *   Copyright 2017, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze <kyle@aims.ac.za>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PACKAGEMODEL_H
@@ -63,8 +53,32 @@ public:
     int rowCount( const QModelIndex& parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex& parent = QModelIndex() ) const override;
 
+    /** @brief Sets the checked flag on matching groups in the tree
+     *
+     * Recursively traverses the tree pointed to by m_rootItem and
+     * checks if a group name matches any of the items in @p selectNames.
+     * If a match is found, set check the box for that group and it's children.
+     *
+     * Individual packages will not be matched.
+     *
+     */
+    void setSelections( const QStringList& selectNames );
+
     PackageTreeItem::List getPackages() const;
     PackageTreeItem::List getItemPackages( PackageTreeItem* item ) const;
+
+    /** @brief Appends groups to the tree
+     *
+     * Uses the data from @p groupList to add elements to the
+     * existing tree that m_rootItem points to.  If m_rootItem
+     * is not valid, it does nothing
+     *
+     * Before adding anything to the model, it ensures that there
+     * is no existing data from the same source.  If there is, that
+     * data is pruned first
+     *
+     */
+    void appendModelData( const QVariantList& groupList );
 
 private:
     friend class ItemTests;

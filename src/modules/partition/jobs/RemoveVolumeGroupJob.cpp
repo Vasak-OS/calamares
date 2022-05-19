@@ -1,28 +1,21 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2018, Caio Jordão Carvalho <caiojcarvalho@gmail.com>
+ *   SPDX-FileCopyrightText: 2018 Caio Jordão Carvalho <caiojcarvalho@gmail.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "RemoveVolumeGroupJob.h"
+
+#include "core/KPMHelpers.h"
 
 #include <kpmcore/core/lvmdevice.h>
 #include <kpmcore/ops/removevolumegroupoperation.h>
 #include <kpmcore/util/report.h>
 
-RemoveVolumeGroupJob::RemoveVolumeGroupJob( LvmDevice* device )
+RemoveVolumeGroupJob::RemoveVolumeGroupJob( Device*, LvmDevice* device )
     : m_device( device )
 {
 }
@@ -48,17 +41,7 @@ RemoveVolumeGroupJob::prettyStatusMessage() const
 Calamares::JobResult
 RemoveVolumeGroupJob::exec()
 {
-    Report report( nullptr );
-
-    RemoveVolumeGroupOperation op( *m_device );
-
-    op.setStatus( Operation::OperationStatus::StatusRunning );
-
-    QString message = tr( "The installer failed to remove a volume group named '%1'." ).arg( m_device->name() );
-    if ( op.execute( report ) )
-    {
-        return Calamares::JobResult::ok();
-    }
-
-    return Calamares::JobResult::error( message, report.toText() );
+    return KPMHelpers::execute(
+        RemoveVolumeGroupOperation( *m_device ),
+        tr( "The installer failed to remove a volume group named '%1'." ).arg( m_device->name() ) );
 }

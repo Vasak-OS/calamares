@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <author>
+SPDX-FileCopyrightText: 2016 shainer &lt;syn.shainer@gmail.com&gt;
+SPDX-License-Identifier: GPL-3.0-or-later
+ </author>
  <class>Page_NetInst</class>
  <widget class="QWidget" name="Page_NetInst">
   <property name="geometry">
@@ -32,13 +36,13 @@
      <property name="widgetResizable">
       <bool>true</bool>
      </property>
-     <widget class="QTreeView" name="groupswidget">
+     <widget class="GroupsTreeView" name="groupswidget">
       <property name="geometry">
        <rect>
         <x>0</x>
         <y>0</y>
         <width>981</width>
-        <height>407</height>
+        <height>410</height>
        </rect>
       </property>
       <property name="font">
@@ -59,6 +63,13 @@
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>GroupsTreeView</class>
+   <extends>QTreeView</extends>
+   <header>groupstreeview.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

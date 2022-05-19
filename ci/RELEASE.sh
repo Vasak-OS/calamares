@@ -1,8 +1,13 @@
 #! /bin/sh
 #
+#   SPDX-FileCopyrightText: 2018 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
+#
 ### USAGE
 #
 # Release script for Calamares
+#
+# NOTE: this script contains Linuxisms (in particular, expects GNU mktemp(1))
 #
 # This attempts to perform the different steps of the RELEASE.md
 # document automatically. It's not tested on other machines or
@@ -70,6 +75,12 @@ fi
 #
 #
 BUILDDIR=$(mktemp -d --suffix=-build --tmpdir=.)
+KEY_ID="328D742D8807A435"
+
+# Try to make gpg cache the signing key, so we can leave the process
+# to run and sign.
+rm -f CMakeLists.txt.gpg
+gpg -s -u $KEY_ID CMakeLists.txt
 
 ### Build with default compiler
 #
@@ -78,7 +89,7 @@ if test "x$BUILD_DEFAULT" = "xtrue" ; then
     rm -rf "$BUILDDIR"
     mkdir "$BUILDDIR" || { echo "Could not create build directory." ; exit 1 ; }
     ( cd "$BUILDDIR" && cmake .. && make -j4 ) || { echo "Could not perform test-build in $BUILDDIR." ; exit 1 ; }
-    ( cd "$BUILDDIR" && make test ) || { echo "Tests failed in $BUILDDIR." ; exit 1 ; }
+    ( cd "$BUILDDIR" && make test ) || { echo "Tests failed in $BUILDDIR ." ; exit 1 ; }
 fi
 
 ### Build with clang
@@ -95,7 +106,7 @@ if test "x$BUILD_CLANG" = "xtrue" ; then
 fi
 
 if test "x$BUILD_ONLY" = "xtrue" ; then
-    echo "Builds completed, release stopped. Build remains in $BUILDDIR."
+    echo "Builds completed, release stopped. Build remains in $BUILDDIR ."
     exit 1
 fi
 
@@ -106,20 +117,19 @@ else
     # Presumably -B was given; just do the cmake part
     rm -rf "$BUILDDIR"
     mkdir "$BUILDDIR" || { echo "Could not create build directory." ; exit 1 ; }
-    ( cd "$BUILDDIR" && cmake .. ) || { echo "Could not run cmake in $BUILDDIR." ; exit 1 ; }
+    ( cd "$BUILDDIR" && cmake .. ) || { echo "Could not run cmake in $BUILDDIR ." ; exit 1 ; }
 fi
 
 ### Get version number for this release
 #
 #
 V=$( cd "$BUILDDIR" && make show-version | grep ^CALAMARES_VERSION | sed s/^[A-Z_]*=// )
-test -n "$V" || { echo "Could not obtain version in $BUILDDIR." ; exit 1 ; }
+test -n "$V" || { echo "Could not obtain version in $BUILDDIR ." ; exit 1 ; }
 
 ### Create signed tag
 #
 # This is the signing key ID associated with the GitHub account adriaandegroot,
 # which is used to create all "verified" tags in the Calamares repo.
-KEY_ID="128F00873E05AF1D"
 git tag -u "$KEY_ID" -m "Release v$V" "v$V" || { echo "Could not sign tag v$V." ; exit 1 ; }
 
 ### Create the tarball
@@ -139,7 +149,8 @@ TMPDIR=$(mktemp -d --suffix="-calamares-$D")
 test -d "$TMPDIR" || { echo "Could not create tarball-build directory." ; exit 1 ; }
 tar xzf "$TAR_FILE" -C "$TMPDIR" || { echo "Could not unpack tarball." ; exit 1 ; }
 test -d "$TMPDIR/$TAR_V" || { echo "Tarball did not contain source directory." ; exit 1 ; }
-( cd "$TMPDIR/$TAR_V" && cmake . && make -j4 && make test ) || { echo "Tarball build failed in $TMPDIR." ; exit 1 ; }
+( cd "$TMPDIR/$TAR_V" && cmake . && make -j4 && make test ) || { echo "Tarball build failed in $TMPDIR ." ; exit 1 ; }
+gpg -s -u $KEY_ID --detach --armor $TAR_FILE  # Sign the tarball
 
 ### Cleanup
 #
@@ -152,7 +163,6 @@ rm -rf "$TMPDIR"  # From tarball
 cat <<EOF
 # Next steps for this release:
   git push origin v$V
-  gpg -s -u $KEY_ID --detach --armor $TAR_FILE  # Sign the tarball
   # Upload tarball $TAR_FILE and the signature $TAR_FILE.asc
   # Announce via https://github.com/calamares/calamares/releases/new
   # SHA256: $SHA256

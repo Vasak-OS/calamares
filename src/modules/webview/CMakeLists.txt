@@ -1,5 +1,9 @@
-set( CALA_WEBVIEW_INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/src/libcalamaresui )
-set( CALA_WEBVIEW_LINK_LIBRARIES calamaresui )
+# === This file is part of Calamares - <https://calamares.io> ===
+#
+#   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
+#
+set( CALA_WEBVIEW_LINK_LIBRARIES "" )
 
 option( WEBVIEW_FORCE_WEBKIT "Always build webview with WebKit instead of WebEngine regardless of Qt version." OFF)
 
@@ -41,8 +45,6 @@ else()
 endif()
 
 if ( NOT _reason )
-    include_directories( ${CALA_WEBVIEW_INCLUDE_DIRECTORIES} )
-
     configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/WebViewConfig.h.in
                     ${CMAKE_CURRENT_BINARY_DIR}/WebViewConfig.h )
 

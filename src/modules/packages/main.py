@@ -1,27 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2014, Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
-#   Copyright 2015-2017, Teo Mrnjavac <teo@kde.org>
-#   Copyright 2016-2017, Kyle Robbertze <kyle@aims.ac.za>
-#   Copyright 2017, Alf Gaida <agaida@siduction.org>
-#   Copyright 2018, Adriaan de Groot <groot@kde.org>
-#   Copyright 2018, Philip Müller <philm@manjaro.org>
+#   SPDX-FileCopyrightText: 2014 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
+#   SPDX-FileCopyrightText: 2015-2017 Teo Mrnjavac <teo@kde.org>
+#   SPDX-FileCopyrightText: 2016-2017 Kyle Robbertze <kyle@aims.ac.za>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@siduction.org>
+#   SPDX-FileCopyrightText: 2018 Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2018 Philip Müller <philm@manjaro.org>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import abc
 from string import Template
@@ -44,6 +35,10 @@ total_packages = 0  # For the entire job
 completed_packages = 0  # Done so far for this job
 group_packages = 0  # One group of packages from an -install or -remove entry
 
+# A PM object may set this to a string (take care of translations!)
+# to override the string produced by pretty_status_message()
+custom_status_message = None
+
 INSTALL = object()
 REMOVE = object()
 mode_packages = None  # Changes to INSTALL or REMOVE
@@ -60,6 +55,8 @@ def pretty_name():
 
 
 def pretty_status_message():
+    if custom_status_message is not None:
+        return custom_status_message
     if not group_packages:
         if (total_packages > 0):
             # Outside the context of an operation
@@ -160,99 +157,105 @@ class PackageManager(metaclass=abc.ABCMeta):
             self.remove([packagedata["package"]])
             self.run(packagedata["post-script"])
 
+    def operation_install(self, package_list, from_local=False):
+        """
+        Installs the list of packages named in @p package_list .
+        These can be strings -- plain package names -- or
+        structures (with a pre- and post-install step).
 
-class PMPackageKit(PackageManager):
-    backend = "packagekit"
+        This operation is called for "critical" packages,
+        which are expected to succeed, or fail, all together.
+        However, if there are packages with pre- or post-scripts,
+        then packages are installed one-by-one instead.
+
+        NOTE: package managers may reimplement this method
+        NOTE: exceptions are expected to leave this method, to indicate
+              failure of the installation.
+        """
+        if all([isinstance(x, str) for x in package_list]):
+            self.install(package_list, from_local=from_local)
+        else:
+            for package in package_list:
+                self.install_package(package, from_local=from_local)
+
+    def operation_try_install(self, package_list):
+        """
+        Installs the list of packages named in @p package_list .
+        These can be strings -- plain package names -- or
+        structures (with a pre- and post-install step).
+
+        This operation is called for "non-critical" packages,
+        which can succeed or fail without affecting the overall installation.
+        Packages are installed one-by-one to support package managers
+        that do not have a "install as much as you can" mode.
+
+        NOTE: package managers may reimplement this method
+        NOTE: no package-installation exceptions should be raised
+        """
+        # we make a separate package manager call for each package so a
+        # single failing package won't stop all of them
+        for package in package_list:
+            try:
+                self.install_package(package)
+            except subprocess.CalledProcessError:
+                libcalamares.utils.warning("Could not install package %s" % package)
+
+    def operation_remove(self, package_list):
+        """
+        Removes the list of packages named in @p package_list .
+        These can be strings -- plain package names -- or
+        structures (with a pre- and post-install step).
+
+        This operation is called for "critical" packages, which are
+        expected to succeed or fail all together.
+        However, if there are packages with pre- or post-scripts,
+        then packages are removed one-by-one instead.
+
+        NOTE: package managers may reimplement this method
+        NOTE: exceptions should be raised to indicate failure
+        """
+        if all([isinstance(x, str) for x in package_list]):
+            self.remove(package_list)
+        else:
+            for package in package_list:
+                self.remove_package(package)
+
+    def operation_try_remove(self, package_list):
+        """
+        Same relation as try_install has to install, except it removes
+        packages instead. Packages are removed one-by-one.
+
+        NOTE: package managers may reimplement this method
+        NOTE: no package-installation exceptions should be raised
+        """
+        for package in package_list:
+            try:
+                self.remove_package(package)
+            except subprocess.CalledProcessError:
+                libcalamares.utils.warning("Could not remove package %s" % package)
+
+### PACKAGE MANAGER IMPLEMENTATIONS
+#
+# Keep these alphabetical (presumably both by class name and backend name),
+# even the Dummy implementation.
+#
+
+class PMApk(PackageManager):
+    backend = "apk"
 
     def install(self, pkgs, from_local=False):
         for pkg in pkgs:
-            check_target_env_call(["pkcon", "-py", "install", pkg])
+            check_target_env_call(["apk", "add", pkg])
 
     def remove(self, pkgs):
         for pkg in pkgs:
-            check_target_env_call(["pkcon", "-py", "remove", pkg])
+            check_target_env_call(["apk", "del", pkg])
 
     def update_db(self):
-        check_target_env_call(["pkcon", "refresh"])
+        check_target_env_call(["apk", "update"])
 
     def update_system(self):
-        check_target_env_call(["pkcon", "-py", "update"])
-
-class PMZypp(PackageManager):
-    backend = "zypp"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["zypper", "--non-interactive",
-                               "--quiet-install", "install",
-                               "--auto-agree-with-licenses",
-                               "install"] + pkgs)
-
-    def remove(self, pkgs):
-        check_target_env_call(["zypper", "--non-interactive",
-                               "remove"] + pkgs)
-
-    def update_db(self):
-        check_target_env_call(["zypper", "--non-interactive", "update"])
-
-    def update_system(self):
-        # Doesn't need to update the system explicitly
-        pass
-
-class PMYum(PackageManager):
-    backend = "yum"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["yum", "-y", "install"] + pkgs)
-
-    def remove(self, pkgs):
-        check_target_env_call(["yum", "--disablerepo=*", "-C", "-y",
-                               "remove"] + pkgs)
-
-    def update_db(self):
-        # Doesn't need updates
-        pass
-
-    def update_system(self):
-        check_target_env_call(["yum", "-y", "upgrade"])
-
-class PMDnf(PackageManager):
-    backend = "dnf"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["dnf", "-y", "install"] + pkgs)
-
-    def remove(self, pkgs):
-        # ignore the error code for now because dnf thinks removing a
-        # nonexistent package is an error
-        target_env_call(["dnf", "--disablerepo=*", "-C", "-y",
-                         "remove"] + pkgs)
-
-    def update_db(self):
-        # Doesn't need updates
-        pass
-
-    def update_system(self):
-        check_target_env_call(["dnf", "-y", "upgrade"])
-
-
-class PMUrpmi(PackageManager):
-    backend = "urpmi"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["urpmi", "--download-all", "--no-suggests",
-                               "--no-verify-rpm", "--fastunsafe",
-                               "--ignoresize", "--nolock",
-                               "--auto"] + pkgs)
-
-    def remove(self, pkgs):
-        check_target_env_call(["urpme", "--auto"] + pkgs)
-
-    def update_db(self):
-        check_target_env_call(["urpmi.update", "-a"])
-
-    def update_system(self):
-        # Doesn't need to update the system explicitly
-        pass
+        check_target_env_call(["apk", "upgrade", "--available"])
 
 
 class PMApt(PackageManager):
@@ -275,61 +278,24 @@ class PMApt(PackageManager):
         pass
 
 
-class PMPacman(PackageManager):
-    backend = "pacman"
+class PMDnf(PackageManager):
+    backend = "dnf"
 
     def install(self, pkgs, from_local=False):
-        if from_local:
-            pacman_flags = "-U"
-        else:
-            pacman_flags = "-S"
-
-        check_target_env_call(["pacman", pacman_flags,
-                               "--noconfirm"] + pkgs)
+        check_target_env_call(["dnf", "-y", "install"] + pkgs)
 
     def remove(self, pkgs):
-        check_target_env_call(["pacman", "-Rs", "--noconfirm"] + pkgs)
+        # ignore the error code for now because dnf thinks removing a
+        # nonexistent package is an error
+        target_env_call(["dnf", "--disablerepo=*", "-C", "-y",
+                         "remove"] + pkgs)
 
     def update_db(self):
-        check_target_env_call(["pacman", "-Sy"])
-
-    def update_system(self):
-        check_target_env_call(["pacman", "-Su", "--noconfirm"])
-
-
-class PMPortage(PackageManager):
-    backend = "portage"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["emerge", "-v"] + pkgs)
-
-    def remove(self, pkgs):
-        check_target_env_call(["emerge", "-C"] + pkgs)
-        check_target_env_call(["emerge", "--depclean", "-q"])
-
-    def update_db(self):
-        check_target_env_call(["emerge", "--sync"])
-
-    def update_system(self):
-        # Doesn't need to update the system explicitly
+        # Doesn't need updates
         pass
 
-
-class PMEntropy(PackageManager):
-    backend = "entropy"
-
-    def install(self, pkgs, from_local=False):
-        check_target_env_call(["equo", "i"] + pkgs)
-
-    def remove(self, pkgs):
-        check_target_env_call(["equo", "rm"] + pkgs)
-
-    def update_db(self):
-        check_target_env_call(["equo", "update"])
-
     def update_system(self):
-        # Doesn't need to update the system explicitly
-        pass
+        check_target_env_call(["dnf", "-y", "upgrade"])
 
 
 class PMDummy(PackageManager):
@@ -355,6 +321,186 @@ class PMDummy(PackageManager):
         libcalamares.utils.debug("Dummy backend: Running script '" + str(script) + "'")
 
 
+class PMEntropy(PackageManager):
+    backend = "entropy"
+
+    def install(self, pkgs, from_local=False):
+        check_target_env_call(["equo", "i"] + pkgs)
+
+    def remove(self, pkgs):
+        check_target_env_call(["equo", "rm"] + pkgs)
+
+    def update_db(self):
+        check_target_env_call(["equo", "update"])
+
+    def update_system(self):
+        # Doesn't need to update the system explicitly
+        pass
+
+
+class PMLuet(PackageManager):
+    backend = "luet"
+
+    def install(self, pkgs, from_local=False):
+        check_target_env_call(["luet", "install", "-y"] + pkgs)
+
+    def remove(self, pkgs):
+        check_target_env_call(["luet", "uninstall", "-y"] + pkgs)
+
+    def update_db(self):
+          # Luet checks for DB update everytime its ran.
+        pass
+
+    def update_system(self):
+        check_target_env_call(["luet", "upgrade", "-y"])
+
+
+class PMPackageKit(PackageManager):
+    backend = "packagekit"
+
+    def install(self, pkgs, from_local=False):
+        for pkg in pkgs:
+            check_target_env_call(["pkcon", "-py", "install", pkg])
+
+    def remove(self, pkgs):
+        for pkg in pkgs:
+            check_target_env_call(["pkcon", "-py", "remove", pkg])
+
+    def update_db(self):
+        check_target_env_call(["pkcon", "refresh"])
+
+    def update_system(self):
+        check_target_env_call(["pkcon", "-py", "update"])
+
+
+class PMPacman(PackageManager):
+    backend = "pacman"
+
+    def __init__(self):
+        import re
+        progress_match = re.compile("^\\((\\d+)/(\\d+)\\)")
+
+        def line_cb(line):
+            if line.startswith(":: "):
+                self.in_package_changes = "package" in line or "hooks" in line
+            else:
+                if self.in_package_changes and line.endswith("...\n"):
+                    # Update the message, untranslated; do not change the
+                    # progress percentage, since there may be more "installing..."
+                    # lines in the output for the group, than packages listed
+                    # explicitly. We don't know how to calculate proper progress.
+                    global custom_status_message
+                    custom_status_message = "pacman: " + line.strip()
+                    libcalamares.job.setprogress(self.progress_fraction)
+            libcalamares.utils.debug(line)
+
+        self.in_package_changes = False
+        self.line_cb = line_cb
+
+        pacman = libcalamares.job.configuration.get("pacman", None)
+        if pacman is None:
+            pacman = dict()
+        if type(pacman) is not dict:
+            libcalamares.utils.warning("Job configuration *pacman* will be ignored.")
+            pacman = dict()
+        self.pacman_num_retries = pacman.get("num_retries", 0)
+        self.pacman_disable_timeout = pacman.get("disable_download_timeout", False)
+        self.pacman_needed_only = pacman.get("needed_only", False)
+
+    def reset_progress(self):
+        self.in_package_changes = False
+        # These are globals
+        self.progress_fraction = (completed_packages * 1.0 / total_packages)
+
+    def run_pacman(self, command, callback=False):
+        """
+        Call pacman in a loop until it is successful or the number of retries is exceeded
+        :param command: The pacman command to run
+        :param callback: An optional boolean that indicates if this pacman run should use the callback
+        :return:
+        """
+
+        pacman_count = 0
+        while pacman_count <= self.pacman_num_retries:
+            pacman_count += 1
+            try:
+                if False: # callback:
+                    libcalamares.utils.target_env_process_output(command, self.line_cb)
+                else:
+                    libcalamares.utils.target_env_process_output(command)
+
+                return
+            except subprocess.CalledProcessError:
+                if pacman_count <= self.pacman_num_retries:
+                    pass
+                else:
+                    raise
+
+    def install(self, pkgs, from_local=False):
+        command = ["pacman"]
+
+        if from_local:
+            command.append("-U")
+        else:
+            command.append("-S")
+
+        # Don't ask for user intervention, take the default action
+        command.append("--noconfirm")
+
+        # Don't report download progress for each file
+        command.append("--noprogressbar")
+
+        if self.pacman_needed_only is True:
+            command.append("--needed")
+
+        if self.pacman_disable_timeout is True:
+            command.append("--disable-download-timeout")
+
+        command += pkgs
+
+        self.reset_progress()
+        self.run_pacman(command, True)
+
+    def remove(self, pkgs):
+        self.reset_progress()
+        self.run_pacman(["pacman", "-Rs", "--noconfirm"] + pkgs, True)
+
+    def update_db(self):
+        self.run_pacman(["pacman", "-Sy"])
+
+    def update_system(self):
+        command = ["pacman", "-Su", "--noconfirm"]
+        if self.pacman_disable_timeout is True:
+            command.append("--disable-download-timeout")
+
+        self.run_pacman(command)
+
+
+class PMPamac(PackageManager):
+    backend = "pamac"
+
+    def del_db_lock(self, lock="/var/lib/pacman/db.lck"):
+        # In case some error or crash, the database will be locked,
+        # resulting in remaining packages not being installed.
+        check_target_env_call(["rm", "-f", lock])
+
+    def install(self, pkgs, from_local=False):
+        self.del_db_lock()
+        check_target_env_call([self.backend, "install", "--no-confirm"] + pkgs)
+
+    def remove(self, pkgs):
+        self.del_db_lock()
+        check_target_env_call([self.backend, "remove", "--no-confirm"] + pkgs)
+
+    def update_db(self):
+        self.del_db_lock()
+        check_target_env_call([self.backend, "update", "--no-confirm"])
+
+    def update_system(self):
+        self.del_db_lock()
+        check_target_env_call([self.backend, "upgrade", "--no-confirm"])
+
+
 class PMPisi(PackageManager):
     backend = "pisi"
 
@@ -372,22 +518,77 @@ class PMPisi(PackageManager):
         pass
 
 
-class PMApk(PackageManager):
-    backend = "apk"
+class PMPortage(PackageManager):
+    backend = "portage"
 
     def install(self, pkgs, from_local=False):
-        for pkg in pkgs:
-            check_target_env_call(["apk", "add", pkg])
+        check_target_env_call(["emerge", "-v"] + pkgs)
 
     def remove(self, pkgs):
-        for pkg in pkgs:
-            check_target_env_call(["apk", "del", pkg])
+        check_target_env_call(["emerge", "-C"] + pkgs)
+        check_target_env_call(["emerge", "--depclean", "-q"])
 
     def update_db(self):
-        check_target_env_call(["apk", "update"])
+        check_target_env_call(["emerge", "--sync"])
 
     def update_system(self):
-        check_target_env_call(["apk", "upgrade", "--available"])
+        # Doesn't need to update the system explicitly
+        pass
+
+
+class PMXbps(PackageManager):
+    backend = "xbps"
+
+    def install(self, pkgs, from_local=False):
+        check_target_env_call(["xbps-install", "-Sy"] + pkgs)
+
+    def remove(self, pkgs):
+        check_target_env_call(["xbps-remove", "-Ry", "--noconfirm"] + pkgs)
+
+    def update_db(self):
+        check_target_env_call(["xbps-install", "-S"])
+
+    def update_system(self):
+        check_target_env_call(["xbps", "-Suy"])
+
+
+class PMYum(PackageManager):
+    backend = "yum"
+
+    def install(self, pkgs, from_local=False):
+        check_target_env_call(["yum", "-y", "install"] + pkgs)
+
+    def remove(self, pkgs):
+        check_target_env_call(["yum", "--disablerepo=*", "-C", "-y",
+                               "remove"] + pkgs)
+
+    def update_db(self):
+        # Doesn't need updates
+        pass
+
+    def update_system(self):
+        check_target_env_call(["yum", "-y", "upgrade"])
+
+
+class PMZypp(PackageManager):
+    backend = "zypp"
+
+    def install(self, pkgs, from_local=False):
+        check_target_env_call(["zypper", "--non-interactive",
+                               "--quiet-install", "install",
+                               "--auto-agree-with-licenses",
+                               "install"] + pkgs)
+
+    def remove(self, pkgs):
+        check_target_env_call(["zypper", "--non-interactive",
+                               "remove"] + pkgs)
+
+    def update_db(self):
+        check_target_env_call(["zypper", "--non-interactive", "update"])
+
+    def update_system(self):
+        # Doesn't need to update the system explicitly
+        pass
 
 
 # Collect all the subclasses of PackageManager defined above,
@@ -465,45 +666,19 @@ def run_operations(pkgman, entry):
         group_packages = len(package_list)
         if key == "install":
             _change_mode(INSTALL)
-            if all([isinstance(x, str) for x in package_list]):
-                pkgman.install(package_list)
-            else:
-                for package in package_list:
-                    pkgman.install_package(package)
+            pkgman.operation_install(package_list)
         elif key == "try_install":
             _change_mode(INSTALL)
-            # we make a separate package manager call for each package so a
-            # single failing package won't stop all of them
-            for package in package_list:
-                try:
-                    pkgman.install_package(package)
-                except subprocess.CalledProcessError:
-                    warn_text = "Could not install package "
-                    warn_text += str(package)
-                    libcalamares.utils.warning(warn_text)
+            pkgman.operation_try_install(package_list)
         elif key == "remove":
             _change_mode(REMOVE)
-            if all([isinstance(x, str) for x in package_list]):
-                pkgman.remove(package_list)
-            else:
-                for package in package_list:
-                    pkgman.remove_package(package)
+            pkgman.operation_remove(package_list)
         elif key == "try_remove":
             _change_mode(REMOVE)
-            for package in package_list:
-                try:
-                    pkgman.remove_package(package)
-                except subprocess.CalledProcessError:
-                    warn_text = "Could not remove package "
-                    warn_text += str(package)
-                    libcalamares.utils.warning(warn_text)
+            pkgman.operation_try_remove(package_list)
         elif key == "localInstall":
             _change_mode(INSTALL)
-            if all([isinstance(x, str) for x in package_list]):
-                pkgman.install(package_list, from_local=True)
-            else:
-                for package in package_list:
-                    pkgman.install_package(package, from_local=True)
+            pkgman.operation_install(package_list, from_local=True)
         elif key == "source":
             libcalamares.utils.debug("Package-list from {!s}".format(entry[key]))
         else:
@@ -541,11 +716,27 @@ def run():
 
     update_db = libcalamares.job.configuration.get("update_db", False)
     if update_db and libcalamares.globalstorage.value("hasInternet"):
-        pkgman.update_db()
+        try:
+            pkgman.update_db()
+        except subprocess.CalledProcessError as e:
+            libcalamares.utils.warning(str(e))
+            libcalamares.utils.debug("stdout:" + str(e.stdout))
+            libcalamares.utils.debug("stderr:" + str(e.stderr))
+            return (_("Package Manager error"),
+                    _("The package manager could not prepare updates. The command <pre>{!s}</pre> returned error code {!s}.")
+                    .format(e.cmd, e.returncode))
 
     update_system = libcalamares.job.configuration.get("update_system", False)
     if update_system and libcalamares.globalstorage.value("hasInternet"):
-        pkgman.update_system()
+        try:
+            pkgman.update_system()
+        except subprocess.CalledProcessError as e:
+            libcalamares.utils.warning(str(e))
+            libcalamares.utils.debug("stdout:" + str(e.stdout))
+            libcalamares.utils.debug("stderr:" + str(e.stderr))
+            return (_("Package Manager error"),
+                    _("The package manager could not update the system. The command <pre>{!s}</pre> returned error code {!s}.")
+                    .format(e.cmd, e.returncode))
 
     operations = libcalamares.job.configuration.get("operations", [])
     if libcalamares.globalstorage.contains("packageOperations"):
@@ -565,11 +756,18 @@ def run():
     for entry in operations:
         group_packages = 0
         libcalamares.utils.debug(pretty_name())
-        run_operations(pkgman, entry)
+        try:
+            run_operations(pkgman, entry)
+        except subprocess.CalledProcessError as e:
+            libcalamares.utils.warning(str(e))
+            libcalamares.utils.debug("stdout:" + str(e.stdout))
+            libcalamares.utils.debug("stderr:" + str(e.stderr))
+            return (_("Package Manager error"),
+                    _("The package manager could not make changes to the installed system. The command <pre>{!s}</pre> returned error code {!s}.")
+                    .format(e.cmd, e.returncode))
 
     mode_packages = None
 
     libcalamares.job.setprogress(1.0)
-    libcalamares.utils.debug(pretty_name())
 
     return None

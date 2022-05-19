@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2014, Rohan Garg <rohan@kde.org>
-#   Copyright 2015,2019,2020, Philip Müller <philm@manjaro.org>
-#   Copyright 2017, Alf Gaida <agaida@sidution.org>
-#   Copyright 2019, Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2014 Rohan Garg <rohan@kde.org>
+#   SPDX-FileCopyrightText: 2015 2019-2020, Philip Müller <philm@manjaro.org>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@sidution.org>
+#   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import libcalamares
 from libcalamares.utils import debug, target_env_call
@@ -37,35 +28,84 @@ def pretty_name():
     return _("Configuring mkinitcpio.")
 
 
-def cpuinfo():
+def detect_plymouth():
     """
-    Return the information in /proc/cpuinfo as a dictionary in the following
-    format:
+    Checks existence (runnability) of plymouth in the target system.
 
-    cpu_info['proc0']={...}
-    cpu_info['proc1']={...}
+    @return True if plymouth exists in the target, False otherwise
     """
-    cpu_info = OrderedDict()
-    procinfo = OrderedDict()
+    # Used to only check existence of path /usr/bin/plymouth in target
+    return target_env_call(["sh", "-c", "which plymouth"]) == 0
 
-    nprocs = 0
 
-    with open('/proc/cpuinfo') as cpuinfo_file:
-        for line in cpuinfo_file:
-            if not line.strip():
-                # end of one processor
-                cpu_info["proc{!s}".format(nprocs)] = procinfo
-                nprocs += 1
-                # Reset
-                procinfo = OrderedDict()
-            else:
-                if len(line.split(':')) == 2:
-                    splitted_line = line.split(':')[1].strip()
-                    procinfo[line.split(':')[0].strip()] = splitted_line
+class cpuinfo(object):
+    """
+    Object describing the current CPU's characteristics. It may be
+    be considered a named tuple, there's no behavior here.
+
+    Fields in the object:
+        - is_intel (if it's definitely an Intel CPU)
+        - is_amd (if it's definitely an AMD CPU)
+        - number_of_cores
+    It is possible for both is_* fields to be False.
+    """
+    def __init__(self):
+        self.is_intel = False
+        self.is_amd = False
+        self.number_of_cores = 0
+
+        cpu = self._cpuinfo()
+        self.is_intel = cpu['proc0']['vendor_id'].lower() == "genuineintel"
+        self.is_amd = cpu['proc0']['vendor_id'].lower() == "authenticamd"
+        self.number_of_cores = len(cpu)
+
+    @staticmethod
+    def _cpuinfo():
+        """
+        Return the information in /proc/cpuinfo as a dictionary in the following
+        format:
+
+        cpu_info['proc0']={...}
+        cpu_info['proc1']={...}
+        """
+        cpu_info = OrderedDict()
+        procinfo = OrderedDict()
+
+        nprocs = 0
+
+        with open('/proc/cpuinfo') as cpuinfo_file:
+            for line in cpuinfo_file:
+                if not line.strip():
+                    # end of one processor
+                    cpu_info["proc{!s}".format(nprocs)] = procinfo
+                    nprocs += 1
+                    # Reset
+                    procinfo = OrderedDict()
                 else:
-                    procinfo[line.split(':')[0].strip()] = ''
+                    if len(line.split(':')) == 2:
+                        splitted_line = line.split(':')[1].strip()
+                        procinfo[line.split(':')[0].strip()] = splitted_line
+                    else:
+                        procinfo[line.split(':')[0].strip()] = ''
 
-    return cpu_info
+        return cpu_info
+
+
+def get_host_initcpio():
+    """
+    Reads the host system mkinitcpio.conf and returns all
+    the lines from that file, or an empty list if it does
+    not exist.
+    """
+    hostfile = "/etc/mkinitcpio.conf"
+    try:
+        with open(hostfile, "r") as mkinitcpio_file:
+            mklins = [x.strip() for x in mkinitcpio_file.readlines()]
+    except FileNotFoundError:
+        libcalamares.utils.debug("Could not open host file '%s'" % hostfile)
+        mklins = []
+
+    return mklins
 
 
 def write_mkinitcpio_lines(hooks, modules, files, root_mount_point):
@@ -77,57 +117,41 @@ def write_mkinitcpio_lines(hooks, modules, files, root_mount_point):
     :param files:
     :param root_mount_point:
     """
-    hostfile = "/etc/mkinitcpio.conf"
-    try:
-        with open(hostfile, "r") as mkinitcpio_file:
-            mklins = [x.strip() for x in mkinitcpio_file.readlines()]
-    except FileNotFoundError:
-        libcalamares.utils.debug("Could not open host file '%s'" % hostfile)
-        mklins = []
+    mklins = get_host_initcpio()
 
-    for i in range(len(mklins)):
-        if mklins[i].startswith("HOOKS"):
-            joined_hooks = ' '.join(hooks)
-            mklins[i] = "HOOKS=\"{!s}\"".format(joined_hooks)
-        elif mklins[i].startswith("MODULES"):
-            joined_modules = ' '.join(modules)
-            mklins[i] = "MODULES=\"{!s}\"".format(joined_modules)
-        elif mklins[i].startswith("FILES"):
-            joined_files = ' '.join(files)
-            mklins[i] = "FILES=\"{!s}\"".format(joined_files)
+    target_path = os.path.join(root_mount_point, "etc/mkinitcpio.conf")
+    with open(target_path, "w") as mkinitcpio_file:
+        for line in mklins:
+            # Replace HOOKS, MODULES and FILES lines with what we
+            # have found via find_initcpio_features()
+            if line.startswith("HOOKS"):
+                line = "HOOKS=\"{!s}\"".format(' '.join(hooks))
+            elif line.startswith("MODULES"):
+                line = "MODULES=\"{!s}\"".format(' '.join(modules))
+            elif line.startswith("FILES"):
+                line = "FILES=\"{!s}\"".format(' '.join(files))
+            mkinitcpio_file.write(line + "\n")
 
-    path = os.path.join(root_mount_point, "etc/mkinitcpio.conf")
 
-    with open(path, "w") as mkinitcpio_file:
-        mkinitcpio_file.write("\n".join(mklins) + "\n")
-
-def detect_plymouth():
+def find_initcpio_features(partitions, root_mount_point):
     """
-    Checks existence (runnability) of plymouth in the target system.
+    Returns a tuple (hooks, modules, files) needed to support
+    the given @p partitions (filesystems types, encryption, etc)
+    in the target.
 
-    @return True if plymouth exists in the target, False otherwise
+    :param partitions: (from GS)
+    :param root_mount_point: (from GS)
+
+    :return 3-tuple of lists
     """
-    # Used to only check existence of path /usr/bin/plymouth in target
-    isPlymouth = target_env_call(["sh", "-c", "which plymouth"])
-    debug("which plymouth exit code: {!s}".format(isPlymouth))
-
-    return isPlymouth == 0
-
-def modify_mkinitcpio_conf(partitions, root_mount_point):
-    """
-    Modifies mkinitcpio.conf
-
-    :param partitions:
-    :param root_mount_point:
-    """
-    cpu = cpuinfo()
-    swap_uuid = ""
-    btrfs = ""
-    lvm2 = ""
-    hooks = ["base", "udev", "autodetect", "modconf", "block", "keyboard",
-             "keymap"]
+    hooks = ["base", "udev", "autodetect", "modconf", "block", "keyboard", "keymap", "consolefont"]
     modules = []
     files = []
+
+    swap_uuid = ""
+    uses_btrfs = False
+    uses_zfs = False
+    uses_lvm2 = False
     encrypt_hook = False
     openswap_hook = False
     unencrypted_separate_boot = False
@@ -154,31 +178,40 @@ def modify_mkinitcpio_conf(partitions, root_mount_point):
                 openswap_hook = True
 
         if partition["fs"] == "btrfs":
-            btrfs = "yes"
+            uses_btrfs = True
+
+        # In addition to checking the filesystem, check to ensure that zfs is enabled
+        if partition["fs"] == "zfs" and libcalamares.globalstorage.contains("zfsPoolInfo"):
+            uses_zfs = True
 
         if "lvm2" in partition["fs"]:
-            lvm2 = "yes"
+            uses_lvm2 = True
 
         if partition["mountPoint"] == "/" and "luksMapperName" in partition:
             encrypt_hook = True
 
-        if (partition["mountPoint"] == "/boot"
-                and "luksMapperName" not in partition):
+        if (partition["mountPoint"] == "/boot" and "luksMapperName" not in partition):
             unencrypted_separate_boot = True
 
         if partition["mountPoint"] == "/usr":
             hooks.append("usr")
 
     if encrypt_hook:
-        hooks.append("encrypt")
+        if detect_plymouth() and unencrypted_separate_boot:
+            hooks.append("plymouth-encrypt")
+        else:
+            hooks.append("encrypt")
         if not unencrypted_separate_boot and \
            os.path.isfile(
                os.path.join(root_mount_point, "crypto_keyfile.bin")
                ):
             files.append("/crypto_keyfile.bin")
 
-    if lvm2:
+    if uses_lvm2:
         hooks.append("lvm2")
+
+    if uses_zfs:
+        hooks.append("zfs")
 
     if swap_uuid != "":
         if encrypt_hook and openswap_hook:
@@ -187,15 +220,12 @@ def modify_mkinitcpio_conf(partitions, root_mount_point):
     else:
         hooks.extend(["filesystems"])
 
-    if btrfs == "yes" and cpu['proc0']['vendor_id'].lower() != "genuineintel":
-        modules.append("crc32c")
-    elif (btrfs == "yes"
-          and cpu['proc0']['vendor_id'].lower() == "genuineintel"):
-        modules.append("crc32c-intel")
-    elif not os.path.exists(os.path.join(root_mount_point, "usr/bin/grub-set-bootflag")):
+    if uses_btrfs:
+        modules.append("crc32c-intel" if cpuinfo().is_intel else "crc32c")
+    else:
         hooks.append("fsck")
 
-    write_mkinitcpio_lines(hooks, modules, files, root_mount_point)
+    return (hooks, modules, files)
 
 
 def run():
@@ -216,6 +246,7 @@ def run():
         return (_("Configuration Error"),
                 _("No root mount point is given for <pre>{!s}</pre> to use." ).format("initcpiocfg"))
 
-    modify_mkinitcpio_conf(partitions, root_mount_point)
+    hooks, modules, files = find_initcpio_features(partitions, root_mount_point)
+    write_mkinitcpio_lines(hooks, modules, files, root_mount_point)
 
     return None

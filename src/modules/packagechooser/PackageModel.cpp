@@ -1,78 +1,73 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "PackageModel.h"
 
+#include "Branding.h"
 #include "utils/Logger.h"
 #include "utils/Variant.h"
 
-const NamedEnumTable< PackageChooserMode >&
-roleNames()
+#include <QFileInfo>
+
+/** @brief A wrapper for CalamaresUtils::getSubMap that excludes the success param
+ */
+static QVariantMap
+getSubMap( const QVariantMap& map, const QString& key )
 {
-    static const NamedEnumTable< PackageChooserMode > names {
-        { "optional", PackageChooserMode::Optional },
-        { "required", PackageChooserMode::Required },
-        { "optionalmultiple", PackageChooserMode::OptionalMultiple },
-        { "requiredmultiple", PackageChooserMode::RequiredMultiple },
-        // and a bunch of aliases
-        { "zero-or-one", PackageChooserMode::Optional },
-        { "radio", PackageChooserMode::Required },
-        { "one", PackageChooserMode::Required },
-        { "set", PackageChooserMode::OptionalMultiple },
-        { "zero-or-more", PackageChooserMode::OptionalMultiple },
-        { "multiple", PackageChooserMode::RequiredMultiple },
-        { "one-or-more", PackageChooserMode::RequiredMultiple }
-    };
-    return names;
+    bool success;
+
+    return CalamaresUtils::getSubMap( map, key, success );
+}
+
+static QPixmap
+loadScreenshot( const QString& path )
+{
+    if ( QFileInfo::exists( path ) )
+    {
+        return QPixmap( path );
+    }
+
+    const auto* branding = Calamares::Branding::instance();
+    if ( !branding )
+    {
+        return QPixmap();
+    }
+    return QPixmap( branding->componentDirectory() + QStringLiteral( "/" ) + path );
 }
 
 PackageItem::PackageItem() {}
 
-PackageItem::PackageItem( const QString& a_id,
-                          const QString& a_package,
-                          const QString& a_name,
-                          const QString& a_description )
+PackageItem::PackageItem( const QString& a_id, const QString& a_name, const QString& a_description )
     : id( a_id )
-    , package( a_package )
     , name( a_name )
     , description( a_description )
 {
 }
 
 PackageItem::PackageItem( const QString& a_id,
-                          const QString& a_package,
                           const QString& a_name,
                           const QString& a_description,
                           const QString& screenshotPath )
     : id( a_id )
-    , package( a_package )
     , name( a_name )
     , description( a_description )
     , screenshot( screenshotPath )
 {
 }
 
-PackageItem::PackageItem::PackageItem( const QVariantMap& item_map )
+PackageItem::PackageItem( const QVariantMap& item_map )
     : id( CalamaresUtils::getString( item_map, "id" ) )
-    , package( CalamaresUtils::getString( item_map, "package" ) )
     , name( CalamaresUtils::Locale::TranslatedString( item_map, "name" ) )
     , description( CalamaresUtils::Locale::TranslatedString( item_map, "description" ) )
-    , screenshot( CalamaresUtils::getString( item_map, "screenshot" ) )
+    , screenshot( loadScreenshot( CalamaresUtils::getString( item_map, "screenshot" ) ) )
+    , packageNames( CalamaresUtils::getStringList( item_map, "packages" ) )
+    , netinstallData( getSubMap( item_map, "netinstall" ) )
 {
     if ( name.isEmpty() && id.isEmpty() )
     {
@@ -112,6 +107,52 @@ PackageListModel::addPackage( PackageItem&& p )
         m_packages.append( p );
         endInsertRows();
     }
+}
+
+QStringList
+PackageListModel::getInstallPackagesForName( const QString& id ) const
+{
+    for ( const auto& p : qAsConst( m_packages ) )
+    {
+        if ( p.id == id )
+        {
+            return p.packageNames;
+        }
+    }
+    return QStringList();
+}
+
+QStringList
+PackageListModel::getInstallPackagesForNames( const QStringList& ids ) const
+{
+    QStringList l;
+    for ( const auto& p : qAsConst( m_packages ) )
+    {
+        if ( ids.contains( p.id ) )
+        {
+            l.append( p.packageNames );
+        }
+    }
+    return l;
+}
+
+QVariantList
+PackageListModel::getNetinstallDataForNames( const QStringList& ids ) const
+{
+    QVariantList l;
+    for ( auto& p : m_packages )
+    {
+        if ( ids.contains( p.id ) )
+        {
+            if ( !p.netinstallData.isEmpty() )
+            {
+                QVariantMap newData = p.netinstallData;
+                newData[ "source" ] = QStringLiteral( "packageChooser" );
+                l.append( newData );
+            }
+        }
+    }
+    return l;
 }
 
 int

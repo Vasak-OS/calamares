@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2016, Artoo <artoo@manjaro.org>
-#   Copyright 2017, Alf Gaida <agaida@siduction.org>
-#   Copyright 2018, Gabriel Craciunescu <crazy@frugalware.org>
-#   Copyright 2019, Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2016 Artoo <artoo@manjaro.org>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@siduction.org>
+#   SPDX-FileCopyrightText: 2018 Gabriel Craciunescu <crazy@frugalware.org>
+#   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import libcalamares
 
@@ -34,6 +25,16 @@ _ = gettext.translation("calamares-python",
 
 def pretty_name():
     return _("Configure Plymouth theme")
+
+
+def detect_plymouth():
+    """
+    Checks existence (runnability) of plymouth in the target system.
+
+    @return True if plymouth exists in the target, False otherwise
+    """
+    # Used to only check existence of path /usr/bin/plymouth in target
+    return target_env_call(["sh", "-c", "which plymouth"]) == 0
 
 
 class PlymouthController:
@@ -51,14 +52,8 @@ class PlymouthController:
                          plymouth_theme + '|', "-i",
                          "/etc/plymouth/plymouthd.conf"])
 
-    def detect(self):
-        isPlymouth = target_env_call(["sh", "-c", "which plymouth"])
-        debug("which plymouth exit code: {!s}".format(isPlymouth))
-
-        return isPlymouth
-
     def run(self):
-        if self.detect() == 0:
+        if detect_plymouth():
             if (("plymouth_theme" in libcalamares.job.configuration) and
                (libcalamares.job.configuration["plymouth_theme"] is not None)):
                 self.setTheme()

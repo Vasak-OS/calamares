@@ -1,54 +1,54 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2008-2009 Volker Lanz <vl@fidra.de>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2016 Andrius Štikonas <andrius@stikonas.eu>
+ *   SPDX-FileCopyrightText: 2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Flags handling originally from KDE Partition Manager,
- *   Copyright 2008-2009, Volker Lanz <vl@fidra.de>
- *   Copyright 2016,      Andrius Štikonas <andrius@stikonas.eu>
+ *   Flags handling originally from KDE Partition Manager.
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "EditExistingPartitionDialog.h"
 #include "ui_EditExistingPartitionDialog.h"
 
 #include "core/ColorUtils.h"
+#include "core/KPMHelpers.h"
+#include "core/PartUtils.h"
 #include "core/PartitionCoreModule.h"
 #include "core/PartitionInfo.h"
-#include "core/PartUtils.h"
 #include "gui/PartitionDialogHelpers.h"
 #include "gui/PartitionSizeController.h"
 
 #include "GlobalStorage.h"
 #include "JobQueue.h"
+#include "Settings.h"
 #include "partition/FileSystem.h"
 #include "utils/Logger.h"
+#include "widgets/TranslationFix.h"
 
 #include <kpmcore/core/device.h>
 #include <kpmcore/core/partition.h>
 #include <kpmcore/fs/filesystemfactory.h>
+#include <kpmcore/fs/luks.h>
 
 #include <QComboBox>
 #include <QDir>
+#include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 
 using CalamaresUtils::Partition::untranslatedFS;
 using CalamaresUtils::Partition::userVisibleFS;
 
-EditExistingPartitionDialog::EditExistingPartitionDialog( Device* device, Partition* partition, const QStringList& usedMountPoints, QWidget* parentWidget )
+EditExistingPartitionDialog::EditExistingPartitionDialog( Device* device,
+                                                          Partition* partition,
+                                                          const QStringList& usedMountPoints,
+                                                          QWidget* parentWidget )
     : QDialog( parentWidget )
     , m_ui( new Ui_EditExistingPartitionDialog )
     , m_device( device )
@@ -57,51 +57,60 @@ EditExistingPartitionDialog::EditExistingPartitionDialog( Device* device, Partit
     , m_usedMountPoints( usedMountPoints )
 {
     m_ui->setupUi( this );
-    standardMountPoints( *(m_ui->mountPointComboBox), PartitionInfo::mountPoint( partition ) );
+    m_ui->encryptWidget->hide();
+    standardMountPoints( *( m_ui->mountPointComboBox ), PartitionInfo::mountPoint( partition ) );
 
     QColor color = ColorUtils::colorForPartition( m_partition );
     m_partitionSizeController->init( m_device, m_partition, color );
     m_partitionSizeController->setSpinBox( m_ui->sizeSpinBox );
 
-    connect( m_ui->mountPointComboBox, &QComboBox::currentTextChanged,
-             this, &EditExistingPartitionDialog::checkMountPointSelection );
+    connect( m_ui->mountPointComboBox,
+             &QComboBox::currentTextChanged,
+             this,
+             &EditExistingPartitionDialog::checkMountPointSelection );
+
+    // The filesystem label dialog is always enabled, because we may want to change
+    // the label on the current filesystem without formatting.
+    m_ui->fileSystemLabelEdit->setText( m_partition->fileSystem().label() );
 
     replacePartResizerWidget();
 
-    connect( m_ui->formatRadioButton, &QAbstractButton::toggled,
+    connect( m_ui->formatRadioButton,
+             &QAbstractButton::toggled,
              [ this ]( bool doFormat )
-    {
-        replacePartResizerWidget();
+             {
+                 replacePartResizerWidget();
 
-        m_ui->fileSystemLabel->setEnabled( doFormat );
-        m_ui->fileSystemComboBox->setEnabled( doFormat );
+                 m_ui->fileSystemLabel->setEnabled( doFormat );
+                 m_ui->fileSystemComboBox->setEnabled( doFormat );
 
-        if ( !doFormat )
-            m_ui->fileSystemComboBox->setCurrentText( userVisibleFS( m_partition->fileSystem() ) );
+                 if ( !doFormat )
+                 {
+                     m_ui->fileSystemComboBox->setCurrentText( userVisibleFS( m_partition->fileSystem() ) );
+                 }
 
-        updateMountPointPicker();
-    } );
+                 updateMountPointPicker();
+             } );
 
-    connect( m_ui->fileSystemComboBox, &QComboBox::currentTextChanged,
-             [ this ]( QString )
-    {
-        updateMountPointPicker();
-    } );
+    connect(
+        m_ui->fileSystemComboBox, &QComboBox::currentTextChanged, [ this ]( QString ) { updateMountPointPicker(); } );
 
     // File system
     QStringList fsNames;
     for ( auto fs : FileSystemFactory::map() )
     {
-        if ( fs->supportCreate() != FileSystem::cmdSupportNone && fs->type() != FileSystem::Extended )
-            fsNames << userVisibleFS( fs ); // For the combo box
+        // We need to ensure zfs is added to the list if the zfs module is enabled
+        if ( ( fs->type() == FileSystem::Type::Zfs && Calamares::Settings::instance()->isModuleEnabled( "zfs" ) )
+             || ( fs->supportCreate() != FileSystem::cmdSupportNone && fs->type() != FileSystem::Extended ) )
+        {
+            fsNames << userVisibleFS( fs );  // For the combo box
+        }
     }
     m_ui->fileSystemComboBox->addItems( fsNames );
 
     FileSystem::Type defaultFSType;
-    QString untranslatedFSName = PartUtils::findFS(
-                                         Calamares::JobQueue::instance()->
-                                         globalStorage()->
-                                         value( "defaultFileSystemType" ).toString(), &defaultFSType );
+    QString untranslatedFSName = PartUtils::canonicalFilesystemName(
+        Calamares::JobQueue::instance()->globalStorage()->value( "defaultFileSystemType" ).toString(), &defaultFSType );
     if ( defaultFSType == FileSystem::Type::Unknown )
     {
         defaultFSType = FileSystem::Type::Ext4;
@@ -109,77 +118,85 @@ EditExistingPartitionDialog::EditExistingPartitionDialog( Device* device, Partit
 
     QString thisFSNameForUser = userVisibleFS( m_partition->fileSystem() );
     if ( fsNames.contains( thisFSNameForUser ) )
+    {
         m_ui->fileSystemComboBox->setCurrentText( thisFSNameForUser );
+    }
     else
+    {
         m_ui->fileSystemComboBox->setCurrentText( FileSystem::nameForType( defaultFSType ) );
+    }
 
     m_ui->fileSystemLabel->setEnabled( m_ui->formatRadioButton->isChecked() );
     m_ui->fileSystemComboBox->setEnabled( m_ui->formatRadioButton->isChecked() );
 
-    setFlagList( *(m_ui->m_listFlags), m_partition->availableFlags(), PartitionInfo::flags( m_partition ) );
+    // Force a format if the existing device is a zfs device since reusing a zpool isn't currently supported
+    m_ui->formatRadioButton->setChecked( m_partition->fileSystem().type() == FileSystem::Type::Zfs );
+    m_ui->formatRadioButton->setEnabled( !( m_partition->fileSystem().type() == FileSystem::Type::Zfs ) );
+    m_ui->keepRadioButton->setChecked( !( m_partition->fileSystem().type() == FileSystem::Type::Zfs ) );
+    m_ui->keepRadioButton->setEnabled( !( m_partition->fileSystem().type() == FileSystem::Type::Zfs ) );
+
+    setFlagList( *( m_ui->m_listFlags ), m_partition->availableFlags(), PartitionInfo::flags( m_partition ) );
 }
 
-
-EditExistingPartitionDialog::~EditExistingPartitionDialog()
-{}
-
+EditExistingPartitionDialog::~EditExistingPartitionDialog() {}
 
 PartitionTable::Flags
 EditExistingPartitionDialog::newFlags() const
 {
-    return flagsFromList( *(m_ui->m_listFlags) );
+    return flagsFromList( *( m_ui->m_listFlags ) );
 }
 
 void
 EditExistingPartitionDialog::applyChanges( PartitionCoreModule* core )
 {
-    PartitionInfo::setMountPoint( m_partition, selectedMountPoint(m_ui->mountPointComboBox) );
+    PartitionInfo::setMountPoint( m_partition, selectedMountPoint( m_ui->mountPointComboBox ) );
 
     qint64 newFirstSector = m_partitionSizeController->firstSector();
-    qint64 newLastSector  = m_partitionSizeController->lastSector();
-    bool partResizedMoved = newFirstSector != m_partition->firstSector() ||
-                            newLastSector  != m_partition->lastSector();
+    qint64 newLastSector = m_partitionSizeController->lastSector();
+    bool partResizedMoved = newFirstSector != m_partition->firstSector() || newLastSector != m_partition->lastSector();
 
-    cDebug() << "old boundaries:" << m_partition->firstSector()
-             << m_partition->lastSector() << m_partition->length();
-    cDebug() << "new boundaries:" << newFirstSector << newLastSector;
-    cDebug() << "dirty status:" << m_partitionSizeController->isDirty();
+    cDebug() << "old boundaries:" << m_partition->firstSector() << m_partition->lastSector() << m_partition->length();
+    cDebug() << Logger::SubEntry << "new boundaries:" << newFirstSector << newLastSector;
+    cDebug() << Logger::SubEntry << "dirty status:" << m_partitionSizeController->isDirty();
 
     FileSystem::Type fsType = FileSystem::Unknown;
     if ( m_ui->formatRadioButton->isChecked() )
     {
         fsType = m_partition->roles().has( PartitionRole::Extended )
-                ? FileSystem::Extended
-                : FileSystem::typeForName( m_ui->fileSystemComboBox->currentText() );
+            ? FileSystem::Extended
+            : FileSystem::typeForName( m_ui->fileSystemComboBox->currentText() );
     }
+    const QString fsLabel = m_ui->fileSystemLabelEdit->text();
+
+    const auto resultFlags = newFlags();
+    const auto currentFlags = PartitionInfo::flags( m_partition );
 
     if ( partResizedMoved )
     {
         if ( m_ui->formatRadioButton->isChecked() )
         {
-            Partition* newPartition = KPMHelpers::createNewPartition(
-                                          m_partition->parent(),
-                                          *m_device,
-                                          m_partition->roles(),
-                                          fsType,
-                                          newFirstSector,
-                                          newLastSector,
-                                          newFlags() );
+            Partition* newPartition = KPMHelpers::createNewPartition( m_partition->parent(),
+                                                                      *m_device,
+                                                                      m_partition->roles(),
+                                                                      fsType,
+                                                                      fsLabel,
+                                                                      newFirstSector,
+                                                                      newLastSector,
+                                                                      resultFlags );
             PartitionInfo::setMountPoint( newPartition, PartitionInfo::mountPoint( m_partition ) );
             PartitionInfo::setFormat( newPartition, true );
 
             core->deletePartition( m_device, m_partition );
             core->createPartition( m_device, newPartition );
-            core->setPartitionFlags( m_device, newPartition, newFlags() );
+            core->setPartitionFlags( m_device, newPartition, resultFlags );
         }
         else
         {
-            core->resizePartition( m_device,
-                                   m_partition,
-                                   newFirstSector,
-                                   newLastSector );
-            if ( m_partition->activeFlags() != newFlags() )
-                core->setPartitionFlags( m_device, m_partition, newFlags() );
+            core->resizePartition( m_device, m_partition, newFirstSector, newLastSector );
+            if ( currentFlags != resultFlags )
+            {
+                core->setPartitionFlags( m_device, m_partition, resultFlags );
+            }
         }
     }
     else
@@ -191,32 +208,67 @@ EditExistingPartitionDialog::applyChanges( PartitionCoreModule* core )
             if ( m_partition->fileSystem().type() == fsType )
             {
                 core->formatPartition( m_device, m_partition );
-                if ( m_partition->activeFlags() != newFlags() )
-                    core->setPartitionFlags( m_device, m_partition, newFlags() );
+                if ( currentFlags != resultFlags )
+                {
+                    core->setPartitionFlags( m_device, m_partition, resultFlags );
+                }
+                core->setFilesystemLabel( m_device, m_partition, fsLabel );
             }
-            else // otherwise, we delete and recreate the partition with new fs type
+            else  // otherwise, we delete and recreate the partition with new fs type
             {
-                Partition* newPartition = KPMHelpers::createNewPartition(
-                                              m_partition->parent(),
-                                              *m_device,
-                                              m_partition->roles(),
-                                              fsType,
-                                              m_partition->firstSector(),
-                                              m_partition->lastSector(),
-                                              newFlags() );
+                Partition* newPartition = KPMHelpers::createNewPartition( m_partition->parent(),
+                                                                          *m_device,
+                                                                          m_partition->roles(),
+                                                                          fsType,
+                                                                          fsLabel,
+                                                                          m_partition->firstSector(),
+                                                                          m_partition->lastSector(),
+                                                                          resultFlags );
                 PartitionInfo::setMountPoint( newPartition, PartitionInfo::mountPoint( m_partition ) );
                 PartitionInfo::setFormat( newPartition, true );
 
                 core->deletePartition( m_device, m_partition );
                 core->createPartition( m_device, newPartition );
-                core->setPartitionFlags( m_device, newPartition, newFlags() );
+                core->setPartitionFlags( m_device, newPartition, resultFlags );
             }
         }
         else
         {
+            if ( currentFlags != resultFlags )
+            {
+                core->setPartitionFlags( m_device, m_partition, resultFlags );
+            }
+            // In this case, we are not formatting the partition, but we are setting the
+            // label on the current filesystem, if any. We only create the job if the
+            // label actually changed.
+            if ( m_partition->fileSystem().type() != FileSystem::Type::Unformatted
+                 && fsLabel != m_partition->fileSystem().label() )
+            {
+                core->setFilesystemLabel( m_device, m_partition, fsLabel );
+            }
+
             core->refreshPartition( m_device, m_partition );
-            if ( m_partition->activeFlags() != newFlags() )
-                core->setPartitionFlags( m_device, m_partition, newFlags() );
+        }
+
+        // Update the existing luks partition
+        const QString passphrase = m_ui->encryptWidget->passphrase();
+        if ( !passphrase.isEmpty() )
+        {
+            int retCode = KPMHelpers::updateLuksDevice( m_partition, passphrase );
+            if ( retCode != 0 )
+            {
+                QString message = tr( "Passphrase for existing partition" );
+                QString description = tr( "Partition %1 could not be decrypted "
+                                          "with the given passphrase."
+                                          "<br/><br/>"
+                                          "Edit the partition again and give the correct passphrase"
+                                          "or delete and create a new encrypted partition." )
+                                          .arg( m_partition->partitionPath() );
+
+                QMessageBox mb( QMessageBox::Information, message, description, QMessageBox::Ok, this->parentWidget() );
+                Calamares::fixButtonLabels( &mb );
+                mb.exec();
+            }
         }
     }
 }
@@ -240,7 +292,6 @@ EditExistingPartitionDialog::replacePartResizerWidget()
     m_partitionSizeController->setPartResizerWidget( widget, m_ui->formatRadioButton->isChecked() );
 }
 
-
 void
 EditExistingPartitionDialog::updateMountPointPicker()
 {
@@ -255,11 +306,8 @@ EditExistingPartitionDialog::updateMountPointPicker()
         fsType = m_partition->fileSystem().type();
     }
     bool canMount = true;
-    if ( fsType == FileSystem::Extended ||
-         fsType == FileSystem::LinuxSwap ||
-         fsType == FileSystem::Unformatted ||
-         fsType == FileSystem::Unknown ||
-         fsType == FileSystem::Lvm2_PV )
+    if ( fsType == FileSystem::Extended || fsType == FileSystem::LinuxSwap || fsType == FileSystem::Unformatted
+         || fsType == FileSystem::Unknown || fsType == FileSystem::Lvm2_PV )
     {
         canMount = false;
     }
@@ -267,20 +315,50 @@ EditExistingPartitionDialog::updateMountPointPicker()
     m_ui->mountPointLabel->setEnabled( canMount );
     m_ui->mountPointComboBox->setEnabled( canMount );
     if ( !canMount )
+    {
         setSelectedMountPoint( m_ui->mountPointComboBox, QString() );
+    }
+
+    toggleEncryptWidget();
 }
 
 void
 EditExistingPartitionDialog::checkMountPointSelection()
 {
-    if ( m_usedMountPoints.contains( selectedMountPoint( m_ui->mountPointComboBox ) ) )
+    if ( validateMountPoint( selectedMountPoint( m_ui->mountPointComboBox ),
+                             m_usedMountPoints,
+                             m_ui->mountPointExplanation,
+                             m_ui->buttonBox->button( QDialogButtonBox::Ok ) ) )
     {
-        m_ui->labelMountPoint->setText( tr( "Mountpoint already in use. Please select another one." ) );
-        m_ui->buttonBox->button( QDialogButtonBox::Ok )->setEnabled( false );
+        toggleEncryptWidget();
     }
+}
+
+void
+EditExistingPartitionDialog::toggleEncryptWidget()
+{
+    // Show/hide encryptWidget:
+    // check if partition is a previously luks formatted partition
+    // and not currently formatted
+    // and its mount point not a standard mount point except when it's /home
+    QString mp = selectedMountPoint( m_ui->mountPointComboBox );
+    if ( !mp.isEmpty() && m_partition->fileSystem().type() == FileSystem::Luks && !m_ui->formatRadioButton->isChecked()
+         && ( !standardMountPoints().contains( mp ) || mp == "/home" ) )
+    {
+        m_ui->encryptWidget->show();
+        m_ui->encryptWidget->reset( false );
+    }
+    // TODO: When formatting a partition user must be able to encrypt that partition
+    //       Probably need to delete this partition and create a new one
+    // else if ( m_ui->formatRadioButton->isChecked()
+    //           && !mp.isEmpty())
+    // {
+    //     m_ui->encryptWidget->show();
+    //     m_ui->encryptWidget->reset();
+    // }
     else
     {
-        m_ui->labelMountPoint->setText( QString() );
-        m_ui->buttonBox->button( QDialogButtonBox::Ok )->setEnabled( true );
+        m_ui->encryptWidget->reset();
+        m_ui->encryptWidget->hide();
     }
 }

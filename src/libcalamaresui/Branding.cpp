@@ -1,22 +1,14 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2019, Adriaan de Groot <groot@kde.org>
- *   Copyright 2018, Raul Rodrigo Segura (raurodse)
- *   Copyright 2019, Camilo Higuita <milo.h@aol.com>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2018 Raul Rodrigo Segura (raurodse)
+ *   SPDX-FileCopyrightText: 2019 Camilo Higuita <milo.h@aol.com>
+ *   SPDX-FileCopyrightText: 2021 Anubhav Choudhary <ac.10edu@gmail.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "Branding.h"
@@ -26,6 +18,7 @@
 #include "utils/ImageRegistry.h"
 #include "utils/Logger.h"
 #include "utils/NamedEnum.h"
+#include "utils/Units.h"
 #include "utils/Yaml.h"
 
 #include <QDir>
@@ -41,6 +34,13 @@
 #include <KOSRelease>
 #endif
 
+[[noreturn]] static void
+bail( const QString& descriptorPath, const QString& message )
+{
+    cError() << "FATAL in" << descriptorPath << Logger::Continuation << Logger::NoQuote << message;
+    ::exit( EXIT_FAILURE );
+}
+
 namespace Calamares
 {
 
@@ -49,6 +49,10 @@ Branding* Branding::s_instance = nullptr;
 Branding*
 Branding::instance()
 {
+    if ( !s_instance )
+    {
+        cWarning() << "No Branding instance created yet.";
+    }
     return s_instance;
 }
 
@@ -67,16 +71,18 @@ const QStringList Branding::s_stringEntryStrings =
     "productUrl",
     "supportUrl",
     "knownIssuesUrl",
-    "releaseNotesUrl"
+    "releaseNotesUrl",
+    "donateUrl"
 };
 
 
 const QStringList Branding::s_imageEntryStrings =
 {
-    "productLogo",
+    "productBanner",
     "productIcon",
-    "productWelcome",
-    "productWallpaper"
+    "productLogo",
+    "productWallpaper",
+    "productWelcome"
 };
 
 const QStringList Branding::s_styleEntryStrings =
@@ -85,6 +91,13 @@ const QStringList Branding::s_styleEntryStrings =
     "sidebarText",
     "sidebarTextSelect",
     "sidebarTextHighlight"
+};
+
+const QStringList Branding::s_uploadServerStrings =
+{
+    "type",
+    "url",
+    "port"
 };
 // clang-format on
 // *INDENT-ON*
@@ -123,13 +136,41 @@ loadStrings( QMap< QString, QString >& map,
         throw YAML::Exception( YAML::Mark(), std::string( "Branding configuration is not a map: " ) + key );
     }
 
-    const auto& config = CalamaresUtils::yamlMapToVariant( doc[ key ] );
-
-    map.clear();
+    const QVariantMap config = CalamaresUtils::yamlMapToVariant( doc[ key ] );
     for ( auto it = config.constBegin(); it != config.constEnd(); ++it )
     {
         map.insert( it.key(), transform( it.value().toString() ) );
     }
+}
+
+static Branding::UploadServerInfo
+uploadServerFromMap( const QVariantMap& map )
+{
+    using Type = Branding::UploadServerType;
+    // *INDENT-OFF*
+    // clang-format off
+    static const NamedEnumTable< Type > names {
+        { "none", Type::None },
+        { "fiche", Type::Fiche }
+    };
+    // clang-format on
+    // *INDENT-ON*
+
+    QString typestring = map[ "type" ].toString();
+    QString urlstring = map[ "url" ].toString();
+    qint64 sizeLimitKiB = map[ "sizeLimit" ].toLongLong();
+
+    if ( typestring.isEmpty() || urlstring.isEmpty() )
+    {
+        return Branding::UploadServerInfo { Branding::UploadServerType::None, QUrl(), 0 };
+    }
+
+    bool bogus = false;  // we don't care about type-name lookup success here
+    return Branding::UploadServerInfo {
+        names.find( typestring, bogus ),
+        QUrl( urlstring, QUrl::ParsingMode::StrictMode ),
+        sizeLimitKiB >= 0 ? CalamaresUtils::KiBtoBytes( static_cast< unsigned long long >( sizeLimitKiB ) ) : -1
+    };
 }
 
 /** @brief Load the @p map with strings from @p config
@@ -151,7 +192,7 @@ Branding::Branding( const QString& brandingFilePath, QObject* parent )
     QDir componentDir( componentDirectory() );
     if ( !componentDir.exists() )
     {
-        bail( "Bad component directory path." );
+        bail( m_descriptorPath, "Bad component directory path." );
     }
 
     QFile file( brandingFilePath );
@@ -166,10 +207,12 @@ Branding::Branding( const QString& brandingFilePath, QObject* parent )
 
             m_componentName = QString::fromStdString( doc[ "componentName" ].as< std::string >() );
             if ( m_componentName != componentDir.dirName() )
-                bail( "The branding component name should match the name of the "
+                bail( m_descriptorPath,
+                      "The branding component name should match the name of the "
                       "component directory." );
 
             initSimpleSettings( doc );
+            initSlideshowSettings( doc );
 
 #ifdef WITH_KOSRelease
             // Copy the os-release information into a QHash for use by KMacroExpander.
@@ -192,78 +235,43 @@ Branding::Branding( const QString& brandingFilePath, QObject* parent )
                 { QStringLiteral( "VARIANT" ), relInfo.variant() },
                 { QStringLiteral( "VARIANT_ID" ), relInfo.variantId() },
                 { QStringLiteral( "LOGO" ), relInfo.logo() } } };
-            auto expand = [&]( const QString& s ) -> QString {
-                return KMacroExpander::expandMacros( s, relMap, QLatin1Char( '@' ) );
-            };
+            auto expand = [ & ]( const QString& s ) -> QString
+            { return KMacroExpander::expandMacros( s, relMap, QLatin1Char( '@' ) ); };
 #else
             auto expand = []( const QString& s ) -> QString { return s; };
 #endif
-
-
             // Massage the strings, images and style sections.
             loadStrings( m_strings, doc, "strings", expand );
-            loadStrings( m_images, doc, "images", [&]( const QString& s ) -> QString {
-                // See also image()
-                const QString imageName( expand( s ) );
-                QFileInfo imageFi( componentDir.absoluteFilePath( imageName ) );
-                if ( !imageFi.exists() )
-                {
-                    const auto icon = QIcon::fromTheme( imageName );
-                    // Not found, bail out with the filename used
-                    if ( icon.isNull() )
-                    {
-                        bail( QString( "Image file %1 does not exist." ).arg( imageFi.absoluteFilePath() ) );
-                    }
-                    return imageName;  // Not turned into a path
-                }
-                return imageFi.absoluteFilePath();
-            } );
+            loadStrings( m_images,
+                         doc,
+                         "images",
+                         [ & ]( const QString& s ) -> QString
+                         {
+                             // See also image()
+                             const QString imageName( expand( s ) );
+                             QFileInfo imageFi( componentDir.absoluteFilePath( imageName ) );
+                             if ( !imageFi.exists() )
+                             {
+                                 const auto icon = QIcon::fromTheme( imageName );
+                                 // Not found, bail out with the filename used
+                                 if ( icon.isNull() )
+                                 {
+                                     bail(
+                                         m_descriptorPath,
+                                         QString( "Image file %1 does not exist." ).arg( imageFi.absoluteFilePath() ) );
+                                 }
+                                 return imageName;  // Not turned into a path
+                             }
+                             return imageFi.absoluteFilePath();
+                         } );
             loadStrings( m_style, doc, "style", []( const QString& s ) -> QString { return s; } );
 
-            if ( doc[ "slideshow" ].IsSequence() )
-            {
-                QStringList slideShowPictures;
-                doc[ "slideshow" ] >> slideShowPictures;
-                for ( int i = 0; i < slideShowPictures.count(); ++i )
-                {
-                    QString pathString = slideShowPictures[ i ];
-                    QFileInfo imageFi( componentDir.absoluteFilePath( pathString ) );
-                    if ( !imageFi.exists() )
-                    {
-                        bail( QString( "Slideshow file %1 does not exist." ).arg( imageFi.absoluteFilePath() ) );
-                    }
-
-                    slideShowPictures[ i ] = imageFi.absoluteFilePath();
-                }
-
-                //FIXME: implement a GenericSlideShow.qml that uses these slideShowPictures
-            }
-            else if ( doc[ "slideshow" ].IsScalar() )
-            {
-                QString slideshowPath = QString::fromStdString( doc[ "slideshow" ].as< std::string >() );
-                QFileInfo slideshowFi( componentDir.absoluteFilePath( slideshowPath ) );
-                if ( !slideshowFi.exists() || !slideshowFi.fileName().toLower().endsWith( ".qml" ) )
-                    bail( QString( "Slideshow file %1 does not exist or is not a valid QML file." )
-                              .arg( slideshowFi.absoluteFilePath() ) );
-                m_slideshowPath = slideshowFi.absoluteFilePath();
-            }
-            else
-            {
-                bail( "Syntax error in slideshow sequence." );
-            }
-
-            int api = doc[ "slideshowAPI" ].IsScalar() ? doc[ "slideshowAPI" ].as< int >() : -1;
-            if ( ( api < 1 ) || ( api > 2 ) )
-            {
-                cWarning() << "Invalid or missing *slideshowAPI* in branding file.";
-                api = 1;
-            }
-            m_slideshowAPI = api;
+            m_uploadServer = uploadServerFromMap( CalamaresUtils::yamlMapToVariant( doc[ "uploadServer" ] ) );
         }
         catch ( YAML::Exception& e )
         {
             CalamaresUtils::explainYamlException( e, ba, file.fileName() );
-            bail( e.what() );
+            bail( m_descriptorPath, e.what() );
         }
 
         QDir translationsDir( componentDir.filePath( "lang" ) );
@@ -319,7 +327,6 @@ Branding::imagePath( Branding::ImageEntry imageEntry ) const
     return m_images.value( s_imageEntryStrings.value( imageEntry ) );
 }
 
-
 QPixmap
 Branding::image( Branding::ImageEntry imageEntry, const QSize& size ) const
 {
@@ -345,24 +352,42 @@ Branding::image( const QString& imageName, const QSize& size ) const
 {
     QDir componentDir( componentDirectory() );
     QFileInfo imageFi( componentDir.absoluteFilePath( imageName ) );
-    if ( !imageFi.exists() )
+    if ( imageFi.exists() )
+    {
+        return ImageRegistry::instance()->pixmap( imageFi.absoluteFilePath(), size );
+    }
+    else
     {
         const auto icon = QIcon::fromTheme( imageName );
         // Not found, bail out with the filename used
-        if ( icon.isNull() )
+        if ( !icon.isNull() )
         {
-            return QPixmap();
+            return icon.pixmap( size );
         }
-        return icon.pixmap( size );
     }
-    return ImageRegistry::instance()->pixmap( imageFi.absoluteFilePath(), size );
+    return QPixmap();
 }
 
-QString
-Branding::stylesheet() const
+QPixmap
+Branding::image( const QStringList& list, const QSize& size ) const
 {
-    QFileInfo fi( m_descriptorPath );
-    QFileInfo importQSSPath( fi.absoluteDir().filePath( "stylesheet.qss" ) );
+    QDir componentDir( componentDirectory() );
+    for ( const QString& imageName : list )
+    {
+        auto p = image( imageName, size );
+        if ( !p.isNull() )
+        {
+            return p;
+        }
+    }
+    return QPixmap();
+}
+
+
+static QString
+_stylesheet( const QDir& dir )
+{
+    QFileInfo importQSSPath( dir.filePath( "stylesheet.qss" ) );
     if ( importQSSPath.exists() && importQSSPath.isReadable() )
     {
         QFile stylesheetFile( importQSSPath.filePath() );
@@ -371,9 +396,15 @@ Branding::stylesheet() const
     }
     else
     {
-        cWarning() << "The branding component" << fi.absoluteDir().absolutePath() << "does not ship stylesheet.qss.";
+        cWarning() << "The branding component" << dir.absolutePath() << "does not ship stylesheet.qss.";
     }
     return QString();
+}
+
+QString
+Branding::stylesheet() const
+{
+    return _stylesheet( QFileInfo( m_descriptorPath ).absoluteDir() );
 }
 
 void
@@ -394,7 +425,7 @@ Branding::WindowDimension::isValid() const
 }
 
 
-/// @brief Guard against cases where the @p key doesn't exist in @p doc
+/// @brief Get a string (empty is @p key doesn't exist) from @p key in @p doc
 static inline QString
 getString( const YAML::Node& doc, const char* key )
 {
@@ -403,6 +434,18 @@ getString( const YAML::Node& doc, const char* key )
         return QString::fromStdString( doc[ key ].as< std::string >() );
     }
     return QString();
+}
+
+/// @brief Get a node (throws if @p key doesn't exist) from @p key in @p doc
+static inline YAML::Node
+get( const YAML::Node& doc, const char* key )
+{
+    auto r = doc[ key ];
+    if ( !r.IsDefined() )
+    {
+        throw YAML::KeyNotFound( YAML::Mark::null_mark(), std::string( key ) );
+    }
+    return r;
 }
 
 static inline void
@@ -416,8 +459,11 @@ flavorAndSide( const YAML::Node& doc, const char* key, Branding::PanelFlavor& fl
     static const NamedEnumTable< PanelFlavor > sidebarFlavorNames {
         { QStringLiteral( "widget" ), PanelFlavor::Widget },
         { QStringLiteral( "none" ), PanelFlavor::None },
-        { QStringLiteral( "hidden" ), PanelFlavor::None },
+        { QStringLiteral( "hidden" ), PanelFlavor::None }
+#ifdef WITH_QML
+        ,
         { QStringLiteral( "qml" ), PanelFlavor::Qml }
+#endif
     };
     static const NamedEnumTable< PanelSide > panelSideNames {
         { QStringLiteral( "left" ), PanelSide::Left },
@@ -533,12 +579,65 @@ Branding::initSimpleSettings( const YAML::Node& doc )
     }
 }
 
-
-[[noreturn]] void
-Branding::bail( const QString& message )
+void
+Branding::initSlideshowSettings( const YAML::Node& doc )
 {
-    cError() << "FATAL in" << m_descriptorPath << "\n" + message;
-    ::exit( EXIT_FAILURE );
+    QDir componentDir( componentDirectory() );
+
+    auto slideshow = get( doc, "slideshow" );
+    if ( slideshow.IsSequence() )
+    {
+        QStringList slideShowPictures;
+        slideshow >> slideShowPictures;
+        for ( int i = 0; i < slideShowPictures.count(); ++i )
+        {
+            QString pathString = slideShowPictures[ i ];
+            QFileInfo imageFi( componentDir.absoluteFilePath( pathString ) );
+            if ( !imageFi.exists() )
+            {
+                bail( m_descriptorPath,
+                      QString( "Slideshow file %1 does not exist." ).arg( imageFi.absoluteFilePath() ) );
+            }
+
+            slideShowPictures[ i ] = imageFi.absoluteFilePath();
+        }
+
+        m_slideshowFilenames = slideShowPictures;
+        m_slideshowAPI = -1;
+    }
+#ifdef WITH_QML
+    else if ( slideshow.IsScalar() )
+    {
+        QString slideshowPath = QString::fromStdString( slideshow.as< std::string >() );
+        QFileInfo slideshowFi( componentDir.absoluteFilePath( slideshowPath ) );
+        if ( !slideshowFi.exists() || !slideshowFi.fileName().toLower().endsWith( ".qml" ) )
+            bail( m_descriptorPath,
+                  QString( "Slideshow file %1 does not exist or is not a valid QML file." )
+                      .arg( slideshowFi.absoluteFilePath() ) );
+        m_slideshowPath = slideshowFi.absoluteFilePath();
+
+        // API choice is relevant for QML slideshow
+        // TODO:3.3: use get(), make slideshowAPI required
+        int api
+            = ( doc[ "slideshowAPI" ] && doc[ "slideshowAPI" ].IsScalar() ) ? doc[ "slideshowAPI" ].as< int >() : -1;
+        if ( ( api < 1 ) || ( api > 2 ) )
+        {
+            cWarning() << "Invalid or missing *slideshowAPI* in branding file.";
+            api = 1;
+        }
+        m_slideshowAPI = api;
+    }
+#else
+    else if ( slideshow.IsScalar() )
+    {
+        cWarning() << "Invalid *slideshow* setting, must be list of images.";
+    }
+#endif
+    else
+    {
+        bail( m_descriptorPath, "Syntax error in slideshow sequence." );
+    }
 }
+
 
 }  // namespace Calamares

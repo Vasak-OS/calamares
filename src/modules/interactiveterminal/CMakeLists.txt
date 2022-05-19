@@ -1,3 +1,8 @@
+# === This file is part of Calamares - <https://calamares.io> ===
+#
+#   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+#   SPDX-License-Identifier: BSD-2-Clause
+#
 find_package(ECM ${ECM_VERSION} REQUIRED NO_MODULE)
 
 set( kf5_ver 5.41 )
@@ -20,8 +25,6 @@ if ( KF5Parts_FOUND AND KF5Service_FOUND )
         SOURCES
             InteractiveTerminalViewStep.cpp
             InteractiveTerminalPage.cpp
-        LINK_PRIVATE_LIBRARIES
-            calamaresui
         LINK_LIBRARIES
             KF5::Service
             KF5::Parts

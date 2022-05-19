@@ -1,20 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PARTITION_MOUNT_H
@@ -22,8 +14,11 @@
 
 #include "DllMacro.h"
 
+#include <QList>
 #include <QString>
 #include <QStringList>
+
+#include <memory>
 
 namespace CalamaresUtils
 {
@@ -56,6 +51,13 @@ DLLEXPORT int mount( const QString& devicePath,
  */
 DLLEXPORT int unmount( const QString& path, const QStringList& options = QStringList() );
 
+
+/** @brief Mount and automatically unmount a device
+ *
+ * The TemporaryMount object mounts a filesystem, and is like calling
+ * the mount() function, above. When the object is destroyed, unmount()
+ * is called with suitable options to undo the original mount.
+ */
 class DLLEXPORT TemporaryMount
 {
 public:
@@ -66,12 +68,42 @@ public:
     TemporaryMount& operator=( const TemporaryMount& ) = delete;
     ~TemporaryMount();
 
-    bool isValid() const { return m_d; }
+    bool isValid() const { return bool( m_d ); }
     QString path() const;
 
 private:
     struct Private;
-    Private* m_d = nullptr;
+    std::unique_ptr< Private > m_d;
+};
+
+
+/** @brief Information about a mount point from /etc/mtab
+ *
+ * Entries in /etc/mtab are of the form: <device> <mountpoint> <other>
+ * This struct only stores device and mountpoint.
+ *
+ * The main way of getting these structs is to call fromMtab() to read
+ * an /etc/mtab-like file and storing all of the entries from it.
+ */
+struct DLLEXPORT MtabInfo
+{
+    QString device;
+    QString mountPoint;
+
+    /** @brief Reads an mtab-like file and returns the entries from it
+     *
+     * When @p mtabPath is given, that file is read. If the given name is
+     * empty (e.g. the default) then /etc/mtab is read, instead.
+     *
+     * If @p mountPrefix is given, then only entries that have a mount point
+     * that starts with that prefix are returned.
+     */
+    static QList< MtabInfo > fromMtabFilteredByPrefix( const QString& mountPrefix = QString(),
+                                                       const QString& mtabPath = QString() );
+    /// @brief Predicate to sort MtabInfo objects by device-name
+    static bool deviceOrder( const MtabInfo& a, const MtabInfo& b ) { return a.device > b.device; }
+    /// @brief Predicate to sort MtabInfo objects by mount-point
+    static bool mountPointOrder( const MtabInfo& a, const MtabInfo& b ) { return a.mountPoint > b.mountPoint; }
 };
 
 }  // namespace Partition

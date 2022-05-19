@@ -1,26 +1,19 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2008 2010, Volker Lanz <vl@fidra.de>
+ *   SPDX-FileCopyrightText: 2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Based on the SetPartFlagsJob class from KDE Partition Manager,
- *   Copyright 2008, 2010, Volker Lanz <vl@fidra.de>
+ *   Based on the SetPartFlagsJob class from KDE Partition Manager
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "SetPartitionFlagsJob.h"
+
+#include "core/KPMHelpers.h"
 
 #include "partition/FileSystem.h"
 #include "utils/Logger.h"
@@ -153,20 +146,12 @@ SetPartFlagsJob::prettyStatusMessage() const
 Calamares::JobResult
 SetPartFlagsJob::exec()
 {
-    cDebug() << "Setting flags on" << m_device->deviceNode() << "partition" << partition()->deviceNode() << "to"
-             << m_flags;
+    QStringList flagsList = PartitionTable::flagNames( m_flags );
+    cDebug() << "Setting flags on" << m_device->deviceNode() << "partition" << partition()->deviceNode()
+             << Logger::DebugList( flagsList );
 
-    Report report( nullptr );
     SetPartFlagsOperation op( *m_device, *partition(), m_flags );
-    op.setStatus( Operation::StatusRunning );
     connect( &op, &Operation::progress, this, &SetPartFlagsJob::iprogress );
-
-    QString errorMessage
-        = tr( "The installer failed to set flags on partition %1." ).arg( m_partition->partitionPath() );
-    if ( op.execute( report ) )
-    {
-        return Calamares::JobResult::ok();
-    }
-
-    return Calamares::JobResult::error( errorMessage, report.toText() );
+    return KPMHelpers::execute(
+        op, tr( "The installer failed to set flags on partition %1." ).arg( m_partition->partitionPath() ) );
 }

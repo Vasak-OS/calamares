@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2017, 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2017 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef PARTITIONMODEL_H
 #define PARTITIONMODEL_H
@@ -50,7 +41,7 @@ public:
     /**
      * This helper class must be instantiated on the stack *before* making
      * changes to the device represented by this model. It will cause the model
-     * to emit modelAboutToBeReset() when instantiated and modelReset() when
+     * to Q_EMIT modelAboutToBeReset() when instantiated and modelReset() when
      * destructed.
      */
     class ResetHelper
@@ -88,6 +79,7 @@ public:
     {
         NameColumn,
         FileSystemColumn,
+        FileSystemLabelColumn,
         MountPointColumn,
         SizeColumn,
         ColumnCount  // Must remain last

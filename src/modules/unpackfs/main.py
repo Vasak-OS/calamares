@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2014, Teo Mrnjavac <teo@kde.org>
-#   Copyright 2014, Daniel Hillenbrand <codeworkx@bbqlinux.org>
-#   Copyright 2014, Philip Müller <philm@manjaro.org>
-#   Copyright 2017, Alf Gaida <agaida@siduction.org>
-#   Copyright 2019, Kevin Kofler <kevin.kofler@chello.at>
-#   Copyright 2020, Adriaan de Groot <groot@kde.org>
-#   Copyright 2020, Gabriel Craciunescu <crazy@frugalware.org>
+#   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+#   SPDX-FileCopyrightText: 2014 Daniel Hillenbrand <codeworkx@bbqlinux.org>
+#   SPDX-FileCopyrightText: 2014 Philip Müller <philm@manjaro.org>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@siduction.org>
+#   SPDX-FileCopyrightText: 2019 Kevin Kofler <kevin.kofler@chello.at>
+#   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2020 Gabriel Craciunescu <crazy@frugalware.org>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import re
@@ -31,13 +22,12 @@ import subprocess
 import sys
 import tempfile
 
-from libcalamares import *
-from libcalamares.utils import mount
+import libcalamares
 
 import gettext
 _ = gettext.translation("calamares-python",
-                        localedir=utils.gettext_path(),
-                        languages=utils.gettext_languages(),
+                        localedir=libcalamares.utils.gettext_path(),
+                        languages=libcalamares.utils.gettext_languages(),
                         fallback=True).gettext
 
 def pretty_name():
@@ -57,8 +47,8 @@ class UnpackEntry:
     :param sourcefs:
     :param destination:
     """
-    __slots__ = ['source', 'sourcefs', 'destination', 'copied', 'total', 'exclude', 'excludeFile',
-                 'mountPoint']
+    __slots__ = ('source', 'sourcefs', 'destination', 'copied', 'total', 'exclude', 'excludeFile',
+                 'mountPoint', 'weight')
 
     def __init__(self, source, sourcefs, destination):
         """
@@ -80,6 +70,7 @@ class UnpackEntry:
         self.copied = 0
         self.total = 0
         self.mountPoint = None
+        self.weight = 1
 
     def is_file(self):
         return self.sourcefs == "file"
@@ -88,24 +79,24 @@ class UnpackEntry:
         """
         Counts the number of files this entry has.
         """
-        fslist = ""
+        # Need a name we can use like a global
+        class counter(object):
+            count = 0
+        def cb_count(s):
+            counter.count += 1
 
         if self.sourcefs == "squashfs":
-            fslist = subprocess.check_output(
-                ["unsquashfs", "-l", self.source]
-                )
+            libcalamares.utils.host_env_process_output(["unsquashfs", "-l", self.source], cb_count)
 
         elif self.sourcefs == "ext4":
-            fslist = subprocess.check_output(
-                ["find", self.mountPoint, "-type", "f"]
-                )
+            libcalamares.utils.host_env_process_output(["find", self.mountPoint, "-type", "f"], cb_count)
 
         elif self.is_file():
             # Hasn't been mounted, copy directly; find handles both
             # files and directories.
-            fslist = subprocess.check_output(["find", self.source, "-type", "f"])
+            libcalamares.utils.host_env_process_output(["find", self.source, "-type", "f"], cb_count)
 
-        self.total = len(fslist.splitlines())
+        self.total = counter.count
         return self.total
 
     def do_mount(self, base):
@@ -131,13 +122,14 @@ class UnpackEntry:
             return
 
         if os.path.isdir(self.source):
-            r = mount(self.source, imgmountdir, "", "--bind")
+            r = libcalamares.utils.mount(self.source, imgmountdir, "", "--bind")
         elif os.path.isfile(self.source):
-            r = mount(self.source, imgmountdir, self.sourcefs, "loop")
+            r = libcalamares.utils.mount(self.source, imgmountdir, self.sourcefs, "loop")
         else: # self.source is a device
-            r = mount(self.source, imgmountdir, self.sourcefs, "")
+            r = libcalamares.utils.mount(self.source, imgmountdir, self.sourcefs, "")
 
         if r != 0:
+            libcalamares.utils.debug("Failed to mount '{}' (fs={}) (target={})".format(self.source, self.sourcefs, imgmountdir))
             raise subprocess.CalledProcessError(r, "mount")
 
 
@@ -149,7 +141,7 @@ def global_excludes():
     List excludes for rsync.
     """
     lst = []
-    extra_mounts = globalstorage.value("extraMounts")
+    extra_mounts = libcalamares.globalstorage.value("extraMounts")
     if extra_mounts is None:
         extra_mounts = []
 
@@ -171,12 +163,9 @@ def file_copy(source, entry, progress_cb):
     :param progress_cb: A callback function for progress reporting.
         Takes a number and a total-number.
     """
-    dest = entry.destination
+    import time
 
-    # Environment used for executing rsync properly
-    # Setting locale to C (fix issue with tr_TR locale)
-    at_env = os.environ
-    at_env["LC_ALL"] = "C"
+    dest = entry.destination
 
     # `source` *must* end with '/' otherwise a directory named after the source
     # will be created in `dest`: ie if `source` is "/foo/bar" and `dest` is
@@ -187,7 +176,7 @@ def file_copy(source, entry, progress_cb):
     num_files_total_local = 0
     num_files_copied = 0  # Gets updated through rsync output
 
-    args = ['rsync', '-aHAXr']
+    args = ['rsync', '-aHAXr', '--filter=-x trusted.overlay.*']
     args.extend(global_excludes())
     if entry.excludeFile:
         args.extend(["--exclude-from=" + entry.excludeFile])
@@ -195,18 +184,20 @@ def file_copy(source, entry, progress_cb):
         for f in entry.exclude:
             args.extend(["--exclude", f])
     args.extend(['--progress', source, dest])
-    process = subprocess.Popen(
-        args, env=at_env,
-        stdout=subprocess.PIPE, close_fds=ON_POSIX
-        )
-    # last_num_files_copied trails num_files_copied, and whenever at least 100 more
-    # files have been copied, progress is reported and last_num_files_copied is updated.
-    last_num_files_copied = 0
-    file_count_chunk = entry.total / 100
-    if file_count_chunk < 100:
-        file_count_chunk = 100
 
-    for line in iter(process.stdout.readline, b''):
+    # last_num_files_copied trails num_files_copied, and whenever at least 107 more
+    # files (file_count_chunk) have been copied, progress is reported and
+    # last_num_files_copied is updated. The chunk size isn't "tidy"
+    # so that all the digits of the progress-reported number change.
+    #
+    file_count_chunk = 107
+
+    class counter(object):
+        last_num_files_copied = 0
+        last_timestamp_reported = time.time()
+        last_total_reported = 0
+
+    def output_cb(line):
         # rsync outputs progress in parentheses. Each line will have an
         # xfer and a chk item (either ir-chk or to-chk) as follows:
         #
@@ -220,7 +211,7 @@ def file_copy(source, entry, progress_cb):
         # If you're copying directory with some links in it, the xfer#
         # might not be a reliable counter (for one increase of xfer, many
         # files may be created).
-        m = re.findall(r'xfr#(\d+), ..-chk=(\d+)/(\d+)', line.decode())
+        m = re.findall(r'xfr#(\d+), ..-chk=(\d+)/(\d+)', line)
 
         if m:
             # we've got a percentage update
@@ -229,13 +220,19 @@ def file_copy(source, entry, progress_cb):
             # adjusting the offset so that progressbar can be continuesly drawn
             num_files_copied = num_files_total_local - num_files_remaining
 
-            # Update about once every 1% of this entry
-            if num_files_copied - last_num_files_copied >= file_count_chunk:
-                last_num_files_copied = num_files_copied
+            now = time.time()
+            if (num_files_copied - counter.last_num_files_copied >= file_count_chunk) or (now - counter.last_timestamp_reported > 0.5):
+                counter.last_num_files_copied = num_files_copied
+                counter.last_timestamp_reported = now
+                counter.last_total_reported = num_files_total_local
                 progress_cb(num_files_copied, num_files_total_local)
 
-    process.wait()
-    progress_cb(num_files_copied, num_files_total_local)  # Push towards 100%
+    try:
+        returncode = libcalamares.utils.host_env_process_output(args, output_cb)
+    except subprocess.CalledProcessError as e:
+        returncode = e.returncode
+
+    progress_cb(counter.last_num_files_copied, counter.last_total_reported)  # Push towards 100%
 
     # Mark this entry as really done
     entry.copied = entry.total
@@ -252,9 +249,9 @@ def file_copy(source, entry, progress_cb):
     # have to do. See also:
     # https://bugzilla.redhat.com/show_bug.cgi?id=868755#c50
     # for the same issue in Anaconda, which uses a similar workaround.
-    if process.returncode != 0 and process.returncode != 23:
-        utils.warning("rsync failed with error code {}.".format(process.returncode))
-        return _("rsync failed with error code {}.").format(process.returncode)
+    if returncode != 0 and returncode != 23:
+        libcalamares.utils.warning("rsync failed with error code {}.".format(returncode))
+        return _("rsync failed with error code {}.").format(returncode)
 
     return None
 
@@ -269,6 +266,7 @@ class UnpackOperation:
     def __init__(self, entries):
         self.entries = entries
         self.entry_for_source = dict((x.source, x) for x in self.entries)
+        self.total_weight = sum([e.weight for e in entries])
 
     def report_progress(self):
         """
@@ -276,31 +274,30 @@ class UnpackOperation:
         """
         progress = float(0)
 
-        done = 0  # Done and total apply to the entry now-unpacking
-        total = 0
-        complete = 0  # This many are already finished
+        current_total = 0
+        current_done = 0  # Files count in the current entry
+        complete_count = 0
+        complete_weight = 0  # This much weight already finished
         for entry in self.entries:
             if entry.total == 0:
                 # Total 0 hasn't counted yet
                 continue
             if entry.total == entry.copied:
-                complete += 1
+                complete_weight += entry.weight
+                complete_count += 1
             else:
                 # There is at most *one* entry in-progress
-                total = entry.total
-                done = entry.copied
+                current_total = entry.total
+                current_done = entry.copied
+                complete_weight += entry.weight * ( 1.0 * current_done ) / current_total
                 break
 
-        if total > 0:
-            # Pretend that each entry represents an equal amount of work;
-            # the complete ones count as 100% of their own fraction
-            # (and have *not* been counted in total or done), while
-            # total/done represents the fraction of the current fraction.
-            progress = ( ( 1.0 * complete ) / len(self.entries) ) + ( ( 1.0 / len(self.entries) ) * ( 1.0 * done / total ) )
+        if current_total > 0:
+            progress = ( 1.0 * complete_weight ) / self.total_weight
 
         global status
-        status = _("Unpacking image {}/{}, file {}/{}").format((complete+1),len(self.entries),done, total)
-        job.setprogress(progress)
+        status = _("Unpacking image {}/{}, file {}/{}").format((complete_count+1), len(self.entries), current_done, current_total)
+        libcalamares.job.setprogress(progress)
 
     def run(self):
         """
@@ -315,7 +312,7 @@ class UnpackOperation:
             complete = 0
             for entry in self.entries:
                 status = _("Starting to unpack {}").format(entry.source)
-                job.setprogress( ( 1.0 * complete ) / len(self.entries) )
+                libcalamares.job.setprogress( ( 1.0 * complete ) / len(self.entries) )
                 entry.do_mount(source_mount_path)
                 entry.do_count()  # Fill in the entry.total
 
@@ -388,23 +385,59 @@ def get_supported_filesystems():
     return ["file"] + get_supported_filesystems_kernel()
 
 
+def repair_root_permissions(root_mount_point):
+    """
+    If the / of the system gets permission 777, change it down
+    to 755. Any other permission is left alone. This
+    works around standard behavior from squashfs where
+    permissions are (easily, accidentally) set to 777.
+    """
+    existing_root_mode = os.stat(root_mount_point).st_mode & 0o777
+    if existing_root_mode == 0o777:
+        try:
+            os.chmod(root_mount_point, 0o755)  # Want / to be rwxr-xr-x
+        except OSError as e:
+            libcalamares.utils.warning("Could not set / to safe permissions: {}".format(e))
+            # But ignore it
+
+
+def extract_weight(entry):
+    """
+    Given @p entry, a dict representing a single entry in
+    the *unpack* list, returns its weight (1, or whatever is
+    set if it is sensible).
+    """
+    w =  entry.get("weight", None)
+    if w:
+        try:
+            wi = int(w)
+            return wi if wi > 0 else 1
+        except ValueError:
+            libcalamares.utils.warning("*weight* setting {!r} is not valid.".format(w))
+        except TypeError:
+            libcalamares.utils.warning("*weight* setting {!r} must be number.".format(w))
+    return 1
+
+
 def run():
     """
     Unsquash filesystem.
     """
-    root_mount_point = globalstorage.value("rootMountPoint")
+    root_mount_point = libcalamares.globalstorage.value("rootMountPoint")
 
     if not root_mount_point:
-        utils.warning("No mount point for root partition")
+        libcalamares.utils.warning("No mount point for root partition")
         return (_("No mount point for root partition"),
-                _("globalstorage does not contain a \"rootMountPoint\" key, "
-                "doing nothing"))
-
+                _("globalstorage does not contain a \"rootMountPoint\" key."))
     if not os.path.exists(root_mount_point):
-        utils.warning("Bad root mount point \"{}\"".format(root_mount_point))
+        libcalamares.utils.warning("Bad root mount point \"{}\"".format(root_mount_point))
         return (_("Bad mount point for root partition"),
-                _("rootMountPoint is \"{}\", which does not "
-                "exist, doing nothing").format(root_mount_point))
+                _("rootMountPoint is \"{}\", which does not exist.".format(root_mount_point)))
+
+    if libcalamares.job.configuration.get("unpack", None) is None:
+        libcalamares.utils.warning("No *unpack* key in job configuration.")
+        return (_("Bad unpackfs configuration"),
+                _("There is no configuration information."))
 
     supported_filesystems = get_supported_filesystems()
 
@@ -412,41 +445,42 @@ def run():
     #   - unsupported filesystems
     #   - non-existent sources
     #   - missing tools for specific FS
-    for entry in job.configuration["unpack"]:
+    for entry in libcalamares.job.configuration["unpack"]:
         source = os.path.abspath(entry["source"])
         sourcefs = entry["sourcefs"]
 
         if sourcefs not in supported_filesystems:
-            utils.warning("The filesystem for \"{}\" ({}) is not supported by your current kernel".format(source, sourcefs))
-            utils.warning(" ... modprobe {} may solve the problem".format(sourcefs))
-            return (_("Bad unsquash configuration"),
+            libcalamares.utils.warning("The filesystem for \"{}\" ({}) is not supported by your current kernel".format(source, sourcefs))
+            libcalamares.utils.warning(" ... modprobe {} may solve the problem".format(sourcefs))
+            return (_("Bad unpackfs configuration"),
                     _("The filesystem for \"{}\" ({}) is not supported by your current kernel").format(source, sourcefs))
         if not os.path.exists(source):
-            utils.warning("The source filesystem \"{}\" does not exist".format(source))
-            return (_("Bad unsquash configuration"),
+            libcalamares.utils.warning("The source filesystem \"{}\" does not exist".format(source))
+            return (_("Bad unpackfs configuration"),
                     _("The source filesystem \"{}\" does not exist").format(source))
         if sourcefs == "squashfs":
             if shutil.which("unsquashfs") is None:
-                utils.warning("Failed to find unsquashfs")
+                libcalamares.utils.warning("Failed to find unsquashfs")
 
-                return (_("Failed to unpack image \"{}\"").format(self.source),
-                        _("Failed to find unsquashfs, make sure you have the squashfs-tools package installed"))
+                return (_("Bad unpackfs configuration"),
+                        _("Failed to find unsquashfs, make sure you have the squashfs-tools package installed.") +
+                        " " + _("Failed to unpack image \"{}\"").format(source))
 
     unpack = list()
 
     is_first = True
-    for entry in job.configuration["unpack"]:
+    for entry in libcalamares.job.configuration["unpack"]:
         source = os.path.abspath(entry["source"])
         sourcefs = entry["sourcefs"]
         destination = os.path.abspath(root_mount_point + entry["destination"])
 
         if not os.path.isdir(destination) and sourcefs != "file":
-            utils.warning(("The destination \"{}\" in the target system is not a directory").format(destination))
+            libcalamares.utils.warning(("The destination \"{}\" in the target system is not a directory").format(destination))
             if is_first:
-                return (_("Bad unsquash configuration"),
+                return (_("Bad unpackfs configuration"),
                         _("The destination \"{}\" in the target system is not a directory").format(destination))
             else:
-                utils.debug(".. assuming that the previous targets will create that directory.")
+                libcalamares.utils.debug(".. assuming that the previous targets will create that directory.")
 
         unpack.append(UnpackEntry(source, sourcefs, destination))
         # Optional settings
@@ -454,9 +488,13 @@ def run():
             unpack[-1].exclude = entry["exclude"]
         if entry.get("excludeFile", None):
             unpack[-1].excludeFile = entry["excludeFile"]
+        unpack[-1].weight = extract_weight(entry)
 
         is_first = False
 
-    unpackop = UnpackOperation(unpack)
-
-    return unpackop.run()
+    repair_root_permissions(root_mount_point)
+    try:
+        unpackop = UnpackOperation(unpack)
+        return unpackop.run()
+    finally:
+        repair_root_permissions(root_mount_point)

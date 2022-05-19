@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PACKAGEMODEL_H
@@ -27,24 +18,15 @@
 #include <QPixmap>
 #include <QVector>
 
-enum class PackageChooserMode
-{
-    Optional,  // zero or one
-    Required,  // exactly one
-    OptionalMultiple,  // zero or more
-    RequiredMultiple  // one or more
-};
-
-const NamedEnumTable< PackageChooserMode >& roleNames();
 
 struct PackageItem
 {
     QString id;
-    // FIXME: unused
-    QString package;
     CalamaresUtils::Locale::TranslatedString name;
     CalamaresUtils::Locale::TranslatedString description;
     QPixmap screenshot;
+    QStringList packageNames;
+    QVariantMap netinstallData;
 
     /// @brief Create blank PackageItem
     PackageItem();
@@ -53,7 +35,7 @@ struct PackageItem
      * This constructor sets all the text members,
      * but leaves the screenshot blank. Set that separately.
      */
-    PackageItem( const QString& id, const QString& package, const QString& name, const QString& description );
+    PackageItem( const QString& id, const QString& name, const QString& description );
 
     /** @brief Creates a PackageItem from given strings.
      *
@@ -61,17 +43,21 @@ struct PackageItem
      * @p screenshotPath, which may be a QRC path (:/path/in/qrc) or
      * a filesystem path, whatever QPixmap understands.
      */
-    PackageItem( const QString& id,
-                 const QString& package,
-                 const QString& name,
-                 const QString& description,
-                 const QString& screenshotPath );
+    PackageItem( const QString& id, const QString& name, const QString& description, const QString& screenshotPath );
 
     /** @brief Creates a PackageItem from a QVariantMap
      *
      * This is intended for use when loading PackageItems from a
      * configuration map. It will look up the various keys in the map
      * and handle translation strings as well.
+     *
+     * The following keys are used:
+     *  - *id*: the identifier for this item; if it is the empty string
+     *    then this is the special "no-package".
+     *  - *name* (and *name[lang]*): for the name and its translations
+     *  - *description* (and *description[lang]*)
+     *  - *screenshot*: a path to a screenshot for this package
+     *  - *packages*: a list of package names
      */
     PackageItem( const QVariantMap& map );
 
@@ -97,7 +83,7 @@ class PackageListModel : public QAbstractListModel
 public:
     PackageListModel( PackageList&& items, QObject* parent );
     PackageListModel( QObject* parent );
-    virtual ~PackageListModel() override;
+    ~PackageListModel() override;
 
     /** @brief Add a package @p to the model
      *
@@ -112,6 +98,27 @@ public:
     const PackageItem& packageData( int r ) const { return m_packages[ r ]; }
     /// @brief Direct (non-abstract) count of package data
     int packageCount() const { return m_packages.count(); }
+
+    /** @brief Does a name lookup (based on id) and returns the packages member
+     *
+     * If there is a package with the given @p id, returns its packages
+     * (e.g. the names of underlying packages to install for it); returns
+     * an empty list if the id is not found.
+     */
+    QStringList getInstallPackagesForName( const QString& id ) const;
+    /** @brief Name-lookup all the @p ids and returns the packages members
+     *
+     * Concatenates installPackagesForName() for each id in @p ids.
+     */
+    QStringList getInstallPackagesForNames( const QStringList& ids ) const;
+
+    /** @brief Does a name lookup (based on id) and returns the netinstall data
+     *
+     * If there is a package with an id in @p ids, returns their netinstall data
+     *
+     * returns a list of netinstall data or an emply list if none is found
+     */
+    QVariantList getNetinstallDataForNames( const QStringList& ids ) const;
 
     enum Roles : int
     {

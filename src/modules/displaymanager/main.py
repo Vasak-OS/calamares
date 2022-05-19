@@ -1,34 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# === This file is part of Calamares - <https://github.com/calamares> ===
+# === This file is part of Calamares - <https://calamares.io> ===
 #
-#   Copyright 2014-2018, Philip Müller <philm@manjaro.org>
-#   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
-#   Copyright 2014, Kevin Kofler <kevin.kofler@chello.at>
-#   Copyright 2017, Alf Gaida <agaida@siduction.org>
-#   Copyright 2017, Bernhard Landauer <oberon@manjaro.org>
-#   Copyright 2017, 2019, Adriaan de Groot <groot@kde.org>
-#   Copyright 2019, Dominic Hayes <ferenosdev@outlook.com>
+#   SPDX-FileCopyrightText: 2014-2018 Philip Müller <philm@manjaro.org>
+#   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+#   SPDX-FileCopyrightText: 2014 Kevin Kofler <kevin.kofler@chello.at>
+#   SPDX-FileCopyrightText: 2017 Alf Gaida <agaida@siduction.org>
+#   SPDX-FileCopyrightText: 2017 Bernhard Landauer <oberon@manjaro.org>
+#   SPDX-FileCopyrightText: 2017 2019, Adriaan de Groot <groot@kde.org>
+#   SPDX-FileCopyrightText: 2019 Dominic Hayes <ferenosdev@outlook.com>
+#   SPDX-License-Identifier: GPL-3.0-or-later
 #
-#   Calamares is free software: you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published by
-#   the Free Software Foundation, either version 3 of the License, or
-#   (at your option) any later version.
+#   Calamares is Free Software: see the License-Identifier above.
 #
-#   Calamares is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
 
 import abc
 import os
-import re
 import libcalamares
-import configparser
 
 from libcalamares.utils import gettext_path, gettext_languages
 
@@ -184,7 +173,6 @@ desktop_environments = [
         '/usr/bin/budgie-session', 'budgie-desktop'  # Budgie v8
         ),
     DesktopEnvironment('/usr/bin/gnome-session', 'gnome'),
-    DesktopEnvironment('/usr/bin/startxfce4', 'xfce'),
     DesktopEnvironment('/usr/bin/cinnamon-session-cinnamon', 'cinnamon'),
     DesktopEnvironment('/usr/bin/mate-session', 'mate'),
     DesktopEnvironment('/usr/bin/enlightenment_start', 'enlightenment'),
@@ -193,9 +181,22 @@ desktop_environments = [
     DesktopEnvironment('/usr/bin/lxqt-session', 'lxqt'),
     DesktopEnvironment('/usr/bin/pekwm', 'pekwm'),
     DesktopEnvironment('/usr/bin/pantheon-session', 'pantheon'),
-    DesktopEnvironment('/usr/bin/i3', 'i3'),
     DesktopEnvironment('/usr/bin/startdde', 'deepin'),
-    DesktopEnvironment('/usr/bin/openbox-session', 'openbox')
+    DesktopEnvironment('/usr/bin/startxfce4', 'xfce'),
+    DesktopEnvironment('/usr/bin/openbox-session', 'openbox'),
+    DesktopEnvironment('/usr/bin/i3', 'i3'),
+    DesktopEnvironment('/usr/bin/awesome', 'awesome'),
+    DesktopEnvironment('/usr/bin/bspwm', 'bspwm'),
+    DesktopEnvironment('/usr/bin/herbstluftwm', 'herbstluftwm'),
+    DesktopEnvironment('/usr/bin/qtile', 'qtile'),
+    DesktopEnvironment('/usr/bin/xmonad', 'xmonad'),
+    DesktopEnvironment('/usr/bin/dwm', 'dwm'),
+    DesktopEnvironment('/usr/bin/jwm', 'jwm'),
+    DesktopEnvironment('/usr/bin/icewm-session', 'icewm-session'),
+    DesktopEnvironment('/usr/bin/fvwm3', 'fvwm3'),
+    DesktopEnvironment('/usr/bin/sway', 'sway'),
+    DesktopEnvironment('/usr/bin/ukui-session', 'ukui'),
+    DesktopEnvironment('/usr/bin/cutefish-session', 'cutefish-xsession'),
 ]
 
 
@@ -287,6 +288,10 @@ class DMmdm(DisplayManager):
 
             with open(mdm_conf_path, 'w') as mdm_conf:
                 for line in text:
+                    if 'AutomaticLogin=' in line:
+                        line = ""
+                    if 'AutomaticLoginEnable=True' in line:
+                        line = ""
                     if '[daemon]' in line:
                         if do_autologin:
                             line = (
@@ -396,6 +401,10 @@ class DMgdm(DisplayManager):
 
             with open(gdm_conf_path, 'w') as gdm_conf:
                 for line in text:
+                    if 'AutomaticLogin=' in line:
+                        line = ""
+                    if 'AutomaticLoginEnable=True' in line:
+                        line = ""
                     if '[daemon]' in line:
                         if do_autologin:
                             line = (
@@ -785,6 +794,8 @@ class DMsddm(DisplayManager):
     executable = "sddm"
 
     def set_autologin(self, username, do_autologin, default_desktop_environment):
+        import configparser
+
         # Systems with Sddm as Desktop Manager
         sddm_conf_path = os.path.join(self.root_mount_point, "etc/sddm.conf")
 
@@ -822,6 +833,92 @@ class DMsddm(DisplayManager):
 
     def greeter_setup(self):
         pass
+
+
+class DMgreetd(DisplayManager):
+    name = "greetd"
+    executable = "greetd"
+    greeter_user = "greeter"
+    greeter_group = "greetd"
+    config_data = {}
+
+    def os_path(self, path):
+        return os.path.join(self.root_mount_point, path)
+
+    def config_path(self):
+        return self.os_path("etc/greetd/config.toml")
+
+    def environments_path(self):
+        return self.os_path("etc/greetd/environments")
+
+    def config_load(self):
+        import toml
+
+        if (os.path.exists(self.config_path())):
+            with open(self.config_path(), "r") as f:
+                self.config_data = toml.load(f)
+
+        self.config_data['terminal'] = dict(vt = "next")
+
+        default_session_group = self.config_data.get('default_session', None)
+        if not default_session_group:
+            self.config_data['default_session'] = {}
+
+        self.config_data['default_session']['user'] = self.greeter_user
+
+        return self.config_data
+
+    def config_write(self):
+        import toml
+        with open(self.config_path(), "w") as f:
+            toml.dump(self.config_data, f)
+
+    def basic_setup(self):
+        if libcalamares.utils.target_env_call(
+                ['getent', 'group', self.greeter_group]
+                ) != 0:
+            libcalamares.utils.target_env_call(
+                ['groupadd', self.greeter_group]
+                )
+
+        if libcalamares.utils.target_env_call(
+                ['getent', 'passwd', self.greeter_user]
+                ) != 0:
+            libcalamares.utils.target_env_call(
+                ['useradd',
+                    '-c', '"Greeter User"',
+                    '-g', self.greeter_group,
+                    '-s', '/bin/bash',
+                    self.greeter_user
+                    ]
+                )
+
+    def desktop_environment_setup(self, default_desktop_environment):
+        with open(self.environments_path(), 'w') as envs_file:
+            envs_file.write(default_desktop_environment.desktop_file)
+            envs_file.write("\n")
+
+    def greeter_setup(self):
+        pass
+
+    def set_autologin(self, username, do_autologin, default_desktop_environment):
+        self.config_load()
+
+        de_command = default_desktop_environment.executable
+        if os.path.exists(self.os_path("usr/bin/gtkgreed")) and os.path.exists(self.os_path("usr/bin/cage")):
+            self.config_data['default_session']['command'] = "cage -s -- gtkgreet"
+        elif os.path.exists(self.os_path("usr/bin/tuigreet")):
+            tuigreet_base_cmd = "tuigreet --remember --time --issue --asterisks --cmd "
+            self.config_data['default_session']['command'] = tuigreet_base_cmd + de_command
+        elif os.path.exists(self.os_path("usr/bin/ddlm")):
+            self.config_data['default_session']['command'] = "ddlm --target " + de_command
+        else:
+            self.config_data['default_session']['command'] = "agreety --cmd " + de_command
+
+        if do_autologin == True:
+            self.config_data['initial_session'] = dict(command = de_command, user = username)
+
+        self.config_write()
 
 
 class DMsysconfig(DisplayManager):
@@ -893,7 +990,7 @@ def run():
     if not displaymanagers:
         return (
             _("No display managers selected for the displaymanager module."),
-            _("The displaymanagers list is empty or undefined in both"
+            _("The displaymanagers list is empty or undefined in both "
             "globalstorage and displaymanager.conf.")
             )
 
@@ -912,7 +1009,7 @@ def run():
             else:
                 dm_instance = None
         else:
-            libcalamares.utils.debug("{!s} has {!d} implementation classes.".format(dm).format(len(impl)))
+            libcalamares.utils.debug("{!s} has {!s} implementation classes.".format(dm, len(impl)))
 
         if dm_instance is None:
             libcalamares.utils.debug("{!s} selected but not installed".format(dm))
@@ -947,7 +1044,7 @@ def run():
     else:
         enable_basic_setup = False
 
-    username = libcalamares.globalstorage.value("autologinUser")
+    username = libcalamares.globalstorage.value("autoLoginUser")
     if username is not None:
         do_autologin = True
         libcalamares.utils.debug("Setting up autologin for user {!s}.".format(username))

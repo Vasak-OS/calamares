@@ -1,32 +1,65 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "DeletePartitionJob.h"
 
-// KPMcore
+#include "core/KPMHelpers.h"
+
+#include "utils/CalamaresUtilsSystem.h"
+
 #include <kpmcore/core/device.h>
 #include <kpmcore/core/partition.h>
 #include <kpmcore/core/partitiontable.h>
 #include <kpmcore/fs/filesystem.h>
 #include <kpmcore/ops/deleteoperation.h>
 #include <kpmcore/util/report.h>
+
+#include <QCoreApplication>
+
+/** @brief Determine if the given partition is of type Zfs
+ *
+ * Returns true if @p partition is of type Zfs
+ *
+ */
+static bool
+isZfs( Partition* partition )
+{
+    return partition->fileSystem().type() == FileSystem::Type::Zfs;
+}
+
+/** @brief Remove the given partition manually
+ *
+ * Uses sfdisk to remove @p partition.  This should only be used in cases
+ * where using kpmcore to remove the partition would not be appropriate
+ *
+ */
+static Calamares::JobResult
+removePartition( Partition* partition )
+{
+    auto r = CalamaresUtils::System::instance()->runCommand(
+        { "sfdisk", "--delete", "--force", partition->devicePath(), QString::number( partition->number() ) },
+        std::chrono::seconds( 5 ) );
+    if ( r.getExitCode() != 0 || r.getOutput().contains( "failed" ) )
+    {
+        return Calamares::JobResult::error(
+            QCoreApplication::translate( DeletePartitionJob::staticMetaObject.className(), "Deletion Failed" ),
+            QCoreApplication::translate( DeletePartitionJob::staticMetaObject.className(),
+                                         "Failed to delete the partition with output: " )
+                + r.getOutput() );
+    }
+    else
+    {
+        return Calamares::JobResult::ok();
+    }
+}
 
 DeletePartitionJob::DeletePartitionJob( Device* device, Partition* partition )
     : PartitionJob( partition )
@@ -58,17 +91,15 @@ DeletePartitionJob::prettyStatusMessage() const
 Calamares::JobResult
 DeletePartitionJob::exec()
 {
-    Report report( nullptr );
-    DeleteOperation op( *m_device, m_partition );
-    op.setStatus( Operation::StatusRunning );
-
-    QString message = tr( "The installer failed to delete partition %1." ).arg( m_partition->devicePath() );
-    if ( op.execute( report ) )
+    // The current implementation of remove() for zfs in kpmcore trys to destroy the zpool by label
+    // This isn't what we want here so we delete the partition instead.
+    if ( isZfs( m_partition ) )
     {
-        return Calamares::JobResult::ok();
+        return removePartition( m_partition );
     }
 
-    return Calamares::JobResult::error( message, report.toText() );
+    return KPMHelpers::execute( DeleteOperation( *m_device, m_partition ),
+                                tr( "The installer failed to delete partition %1." ).arg( m_partition->devicePath() ) );
 }
 
 void

@@ -1,28 +1,20 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017, Andrius Štikonas <andrius@stikonas.eu>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Andrius Štikonas <andrius@stikonas.eu>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "ResizePartitionJob.h"
 
+#include "core/KPMHelpers.h"
+
 #include "utils/Units.h"
 
-// KPMcore
 #include <kpmcore/core/device.h>
 #include <kpmcore/ops/resizeoperation.h>
 #include <kpmcore/util/report.h>
@@ -75,23 +67,16 @@ ResizePartitionJob::prettyStatusMessage() const
 Calamares::JobResult
 ResizePartitionJob::exec()
 {
-    Report report( nullptr );
     // Restore partition sectors that were modified for preview
     m_partition->setFirstSector( m_oldFirstSector );
     m_partition->setLastSector( m_oldLastSector );
+
     ResizeOperation op( *m_device, *m_partition, m_newFirstSector, m_newLastSector );
-    op.setStatus( Operation::StatusRunning );
     connect( &op, &Operation::progress, this, &ResizePartitionJob::iprogress );
-
-    QString errorMessage = tr( "The installer failed to resize partition %1 on disk '%2'." )
-                               .arg( m_partition->partitionPath() )
-                               .arg( m_device->name() );
-    if ( op.execute( report ) )
-    {
-        return Calamares::JobResult::ok();
-    }
-
-    return Calamares::JobResult::error( errorMessage, report.toText() );
+    return KPMHelpers::execute( op,
+                                tr( "The installer failed to resize partition %1 on disk '%2'." )
+                                    .arg( m_partition->partitionPath() )
+                                    .arg( m_device->name() ) );
 }
 
 void

@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 
@@ -25,11 +16,16 @@
 #include "utils/Logger.h"
 #include "utils/Retranslator.h"
 
+#ifndef WITH_KF5DBus
 #include "3rdparty/kdsingleapplicationguard/kdsingleapplicationguard.h"
+#endif
 
-#include <KF5/KCoreAddons/KAboutData>
+#include <KCoreAddons/KAboutData>
+#ifdef WITH_KF5DBus
+#include <KDBusAddons/KDBusService>
+#endif
 #ifdef WITH_KF5Crash
-#include <KF5/KCrash/KCrash>
+#include <KCrash/KCrash>
 #endif
 
 #include <QCommandLineParser>
@@ -63,7 +59,13 @@ debug_level( QCommandLineParser& parser, QCommandLineOption& levelOption )
     }
 }
 
-static void
+/** @brief Handles the command-line arguments
+ *
+ * Sets up internals for Calamares based on command-line arguments like `-D`,
+ * `-d`, etc. Returns @c true if this is a *debug* run, i.e. if the `-d`
+ * command-line flag is given, @c false otherwise.
+ */
+static bool
 handle_args( CalamaresApplication& a )
 {
     QCommandLineOption debugOption( QStringList { "d", "debug" },
@@ -100,8 +102,8 @@ handle_args( CalamaresApplication& a )
         CalamaresUtils::setXdgDirs();
     }
     CalamaresUtils::setAllowLocalTranslation( parser.isSet( debugOption ) || parser.isSet( debugTxOption ) );
-    Calamares::Settings::init( parser.isSet( debugOption ) );
-    a.init();
+
+    return parser.isSet( debugOption );
 }
 
 int
@@ -129,13 +131,14 @@ main( int argc, char* argv[] )
     // TODO: umount anything in /tmp/calamares-... as an emergency save function
 #endif
 
-    KDSingleApplicationGuard guard( KDSingleApplicationGuard::AutoKillOtherInstances );
-    if ( guard.isPrimaryInstance() )
-    {
-        handle_args( a );
-        return a.exec();
-    }
-    else
+    bool is_debug = handle_args( a );
+
+#ifdef WITH_KF5DBus
+    KDBusService service( is_debug ? KDBusService::Multiple : KDBusService::Unique );
+#else
+    KDSingleApplicationGuard guard( is_debug ? KDSingleApplicationGuard::NoPolicy
+                                             : KDSingleApplicationGuard::AutoKillOtherInstances );
+    if ( !is_debug && !guard.isPrimaryInstance() )
     {
         // Here we have not yet set-up the logger system, so qDebug() is ok
         auto instancelist = guard.instances();
@@ -150,4 +153,14 @@ main( int argc, char* argv[] )
         }
         return 69;  // EX_UNAVAILABLE on FreeBSD
     }
+#endif
+
+    Calamares::Settings::init( is_debug );
+    if ( !Calamares::Settings::instance() || !Calamares::Settings::instance()->isValid() )
+    {
+        qCritical() << "Calamares has invalid settings, shutting down.";
+        return 78;  // EX_CONFIG on FreeBSD
+    }
+    a.init();
+    return a.exec();
 }

@@ -1,28 +1,21 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2013-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2013-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
  *   Originally from Tomahawk, portions:
- *   Copyright 2010-2011, Christian Muehlhaeuser <muesli@tomahawk-player.org>
- *   Copyright 2010-2011, Leo Franchi <lfranchi@kde.org>
- *   Copyright 2010-2012, Jeff Mitchell <jeff@tomahawk-player.org>
+ *   SPDX-FileCopyrightText: 2010-2011 Christian Muehlhaeuser <muesli@tomahawk-player.org>
+ *   SPDX-FileCopyrightText: 2010-2011 Leo Franchi <lfranchi@kde.org>
+ *   SPDX-FileCopyrightText: 2010-2012 Jeff Mitchell <jeff@tomahawk-player.org>
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "String.h"
+#include "Logger.h"
 
 #include <QStringList>
 
@@ -127,6 +120,130 @@ obscure( const QString& string )
         result += ( unicode[ i ].unicode() <= 0x21 ) ? unicode[ i ] : QChar( 0x1001F - unicode[ i ].unicode() );
     }
     return result;
+}
+
+
+QString
+truncateMultiLine( const QString& string, CalamaresUtils::LinesStartEnd lines, CalamaresUtils::CharCount chars )
+{
+    const char NEWLINE = '\n';
+    const int maxLines = lines.atStart + lines.atEnd;
+    if ( maxLines < 1 )
+    {
+        QString shorter( string );
+        shorter.truncate( chars.total );
+        return shorter;
+    }
+
+    const int physicalLinesInString = string.count( NEWLINE );
+    const int logicalLinesInString = physicalLinesInString + ( string.endsWith( NEWLINE ) ? 0 : 1 );
+    if ( ( string.length() <= chars.total ) && ( logicalLinesInString <= maxLines ) )
+    {
+        return string;
+    }
+
+    QString front, back;
+    if ( physicalLinesInString >= maxLines )
+    {
+        int from = -1;
+        for ( int i = 0; i < lines.atStart; ++i )
+        {
+            from = string.indexOf( NEWLINE, from + 1 );
+            if ( from < 0 )
+            {
+                // That's strange, we counted at least maxLines newlines before
+                break;
+            }
+        }
+        if ( from > 0 )
+        {
+            front = string.left( from + 1 );
+        }
+
+        int lastNewLine = -1;
+        int lastCount = string.endsWith( NEWLINE ) ? -1 : 0;
+        for ( auto i = string.rbegin(); i != string.rend() && lastCount < lines.atEnd; ++i )
+        {
+            if ( *i == NEWLINE )
+            {
+                ++lastCount;
+                lastNewLine = int( i - string.rbegin() );
+            }
+        }
+        if ( ( lastNewLine >= 0 ) && ( lastCount >= lines.atEnd ) )
+        {
+            back = string.right( lastNewLine );
+        }
+    }
+    else
+    {
+        // We have: <= maxLines and longer than chars.total, so:
+        //   - carve out a chunk in the middle, based a little on
+        //     how the balance of atStart and atEnd is
+        const int charsToChop = string.length() - chars.total;
+        if ( charsToChop < 1 )
+        {
+            // That's strange, again
+            return string;
+        }
+        const int startPortion = charsToChop * lines.atStart / maxLines;
+        const int endPortion = charsToChop * lines.atEnd / maxLines;
+        front = string.left( string.length() / 2 - startPortion );
+        back = string.right( string.length() / 2 - endPortion );
+    }
+
+    if ( front.length() + back.length() <= chars.total )
+    {
+        return front + back;
+    }
+
+    // We need to cut off some bits, preserving whether there are
+    // newlines present at the end of the string. Go case-by-case:
+    if ( !front.isEmpty() && back.isEmpty() )
+    {
+        // Truncate towards the front
+        bool needsNewline = front.endsWith( NEWLINE );
+        front.truncate( chars.total );
+        if ( !front.endsWith( NEWLINE ) && needsNewline )
+        {
+            front.append( NEWLINE );
+        }
+        return front;
+    }
+    if ( front.isEmpty() && !back.isEmpty() )
+    {
+        // Truncate towards the tail
+        return back.right( chars.total );
+    }
+    // Both are non-empty, so nibble away at both of them
+    front.truncate( chars.total / 2 );
+    if ( !front.endsWith( NEWLINE ) && physicalLinesInString > 0 )
+    {
+        front.append( NEWLINE );
+    }
+    return front + back.right( chars.total / 2 );
+}
+
+void
+removeLeading( QString& string, QChar c )
+{
+    int count = 0;
+    while ( string.length() > count && string[ count ] == c )
+    {
+        count++;
+    }
+    string.remove( 0, count );
+}
+
+void
+removeTrailing( QString& string, QChar c )
+{
+    int lastIndex = string.length();
+    while ( lastIndex > 0 && string[ lastIndex - 1 ] == c )
+    {
+        lastIndex--;
+    }
+    string.remove( lastIndex, string.length() );
 }
 
 }  // namespace CalamaresUtils

@@ -1,21 +1,12 @@
 /*
- *   Copyright 2016, Luca Giambonini <almack@chakraos.org>
- *   Copyright 2016, Lisa Vitolo     <shainer@chakraos.org>
- *   Copyright 2017, Kyle Robbertze  <krobbertze@gmail.com>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2016 Luca Giambonini <almack@chakraos.org>
+ *   SPDX-FileCopyrightText: 2016 Lisa Vitolo     <shainer@chakraos.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze  <krobbertze@gmail.com>
+ *   SPDX-FileCopyrightText: 2017-2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef NETINSTALL_CONFIG_H
@@ -23,10 +14,15 @@
 
 #include "PackageModel.h"
 
-#include <QObject>
-#include <QUrl>
+#include "locale/TranslatableConfiguration.h"
+#include "modulesystem/InstanceKey.h"
 
-class QNetworkReply;
+#include <QObject>
+#include <QVariantMap>
+
+#include <memory>
+
+class LoaderQueue;
 
 class Config : public QObject
 {
@@ -35,9 +31,15 @@ class Config : public QObject
     Q_PROPERTY( PackageModel* packageModel MEMBER m_model FINAL )
     Q_PROPERTY( QString status READ status NOTIFY statusChanged FINAL )
 
+    // Translations, of the module name (for sidebar) and above the list
+    Q_PROPERTY( QString sidebarLabel READ sidebarLabel NOTIFY sidebarLabelChanged FINAL )
+    Q_PROPERTY( QString titleLabel READ titleLabel NOTIFY titleLabelChanged FINAL )
+
 public:
     Config( QObject* parent = nullptr );
-    virtual ~Config();
+    ~Config() override;
+
+    void setConfigurationMap( const QVariantMap& configurationMap );
 
     enum class Status
     {
@@ -45,21 +47,23 @@ public:
         FailedBadConfiguration,
         FailedInternalError,
         FailedNetworkError,
-        FailedBadData
+        FailedBadData,
+        FailedNoData
     };
 
+    /// Human-readable, translated representation of the status
     QString status() const;
+    /// Internal code for the status
+    Status statusCode() const { return m_status; }
     void setStatus( Status s );
 
     bool required() const { return m_required; }
     void setRequired( bool r ) { m_required = r; }
 
-    /** @brief Retrieves the groups, with name, description and packages
-     *
-     * Loads data from the given URL. Once done, the data is parsed
-     * and passed on to the other loadGroupList() method.
-     */
-    void loadGroupList( const QUrl& url );
+    PackageModel* model() const { return m_model; }
+
+    QString sidebarLabel() const;
+    QString titleLabel() const;
 
     /** @brief Fill model from parsed data.
      *
@@ -68,18 +72,28 @@ public:
      */
     void loadGroupList( const QVariantList& groupData );
 
-    PackageModel* model() const { return m_model; }
+    /** @brief Write the selected package lists to global storage
+     *
+     * Since the config doesn't know what module it is for,
+     * pass in an instance key.
+     */
+    void finalizeGlobalStorage( const Calamares::ModuleSystem::InstanceKey& key );
 
-signals:
+Q_SIGNALS:
     void statusChanged( QString status );  ///< Something changed
+    void sidebarLabelChanged( QString label );
+    void titleLabelChanged( QString label );
     void statusReady();  ///< Loading groups is complete
 
-private slots:
-    void receivedGroupData();  ///< From async-loading group data
+private Q_SLOTS:
+    void retranslate();
+    void loadingDone();
 
 private:
+    CalamaresUtils::Locale::TranslatedString* m_sidebarLabel = nullptr;  // As it appears in the sidebar
+    CalamaresUtils::Locale::TranslatedString* m_titleLabel = nullptr;
     PackageModel* m_model = nullptr;
-    QNetworkReply* m_reply = nullptr;  // For fetching data
+    LoaderQueue* m_queue = nullptr;
     Status m_status = Status::Ok;
     bool m_required = false;
 };

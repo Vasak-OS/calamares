@@ -1,53 +1,37 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2017-2018, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TRACKINGJOBS
-#define TRACKINGJOBS
+#ifndef TRACKING_TRACKINGJOBS_H
+#define TRACKING_TRACKINGJOBS_H
 
 #include "Job.h"
 
-class QSemaphore;
+class InstallTrackingConfig;
+class MachineTrackingConfig;
+class UserTrackingConfig;
 
-class TrackingInstallJob : public Calamares::Job
-{
-    Q_OBJECT
-public:
-    TrackingInstallJob( const QString& url );
-    ~TrackingInstallJob() override;
+/** @section Tracking Jobs
+ *
+ * The tracking jobs do the actual work of configuring tracking on the
+ * target machine. Tracking jobs may have *styles*, variations depending
+ * on the distro or environment of the target system. At the root of
+ * each family of tracking jobs (installation, machine, user) there is
+ * free function `addJob()` that takes the configuration
+ * information from the relevant Config sub-object and optionally
+ * adds the right job (subclass!) to the list of jobs.
+ *
+ * There are no job-classes defined here because you need to be using the
+ * `addJob()` interface instead.
+ */
 
-    QString prettyName() const override;
-    QString prettyDescription() const override;
-    QString prettyStatusMessage() const override;
-    Calamares::JobResult exec() override;
-
-private:
-    const QString m_url;
-};
-
-class TrackingMachineNeonJob : public Calamares::Job
-{
-    Q_OBJECT
-public:
-    QString prettyName() const override;
-    QString prettyDescription() const override;
-    QString prettyStatusMessage() const override;
-    Calamares::JobResult exec() override;
-};
-
+void addJob( Calamares::JobList& list, InstallTrackingConfig* config );
+void addJob( Calamares::JobList& list, MachineTrackingConfig* config );
+void addJob( Calamares::JobList& list, UserTrackingConfig* config );
 
 #endif

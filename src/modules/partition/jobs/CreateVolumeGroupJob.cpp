@@ -1,30 +1,25 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2018, Caio Jordão Carvalho <caiojcarvalho@gmail.com>
+ *   SPDX-FileCopyrightText: 2018 Caio Jordão Carvalho <caiojcarvalho@gmail.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "CreateVolumeGroupJob.h"
 
-// KPMcore
+#include "core/KPMHelpers.h"
+
 #include <kpmcore/core/lvmdevice.h>
 #include <kpmcore/core/partition.h>
 #include <kpmcore/ops/createvolumegroupoperation.h>
 #include <kpmcore/util/report.h>
 
-CreateVolumeGroupJob::CreateVolumeGroupJob( QString& vgName, QVector< const Partition* > pvList, const qint32 peSize )
+CreateVolumeGroupJob::CreateVolumeGroupJob( Device*,
+                                            QString& vgName,
+                                            QVector< const Partition* > pvList,
+                                            const qint32 peSize )
     : m_vgName( vgName )
     , m_pvList( pvList )
     , m_peSize( peSize )
@@ -52,19 +47,8 @@ CreateVolumeGroupJob::prettyStatusMessage() const
 Calamares::JobResult
 CreateVolumeGroupJob::exec()
 {
-    Report report( nullptr );
-
-    CreateVolumeGroupOperation op( m_vgName, m_pvList, m_peSize );
-
-    op.setStatus( Operation::StatusRunning );
-
-    QString message = tr( "The installer failed to create a volume group named '%1'." ).arg( m_vgName );
-    if ( op.execute( report ) )
-    {
-        return Calamares::JobResult::ok();
-    }
-
-    return Calamares::JobResult::error( message, report.toText() );
+    return KPMHelpers::execute( CreateVolumeGroupOperation( m_vgName, m_pvList, m_peSize ),
+                                tr( "The installer failed to create a volume group named '%1'." ).arg( m_vgName ) );
 }
 
 void

@@ -1,34 +1,23 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2014, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
-#include "core/DeviceModel.h"
+#include "DeviceModel.h"
 
 #include "core/PartitionModel.h"
+#include "core/SizeUtils.h"
 
 #include "utils/CalamaresUtilsGui.h"
 #include "utils/Logger.h"
 
 // KPMcore
 #include <kpmcore/core/device.h>
-
-// KF5
-#include <KFormat>
 
 #include <QIcon>
 #include <QStandardItemModel>
@@ -39,9 +28,9 @@
 static void
 sortDevices( DeviceModel::DeviceList& l )
 {
-    std::sort( l.begin(), l.end(), []( const Device* dev1, const Device* dev2 ) {
-        return dev1->deviceNode() < dev2->deviceNode();
-    } );
+    std::sort( l.begin(),
+               l.end(),
+               []( const Device* dev1, const Device* dev2 ) { return dev1->deviceNode() < dev2->deviceNode(); } );
 }
 
 DeviceModel::DeviceModel( QObject* parent )
@@ -92,7 +81,7 @@ DeviceModel::data( const QModelIndex& index, int role ) const
                 //: device[name] - size[number] (device-node[name])
                 return tr( "%1 - %2 (%3)" )
                     .arg( device->name() )
-                    .arg( KFormat().formatByteSize( device->capacity() ) )
+                    .arg( formatByteSize( device->capacity() ) )
                     .arg( device->deviceNode() );
             }
             else
@@ -108,7 +97,7 @@ DeviceModel::data( const QModelIndex& index, int role ) const
         return CalamaresUtils::defaultPixmap(
             CalamaresUtils::PartitionDisk,
             CalamaresUtils::Original,
-            QSize( CalamaresUtils::defaultIconSize().width() * 3, CalamaresUtils::defaultIconSize().height() * 3 ) );
+            QSize( CalamaresUtils::defaultIconSize().width() * 2, CalamaresUtils::defaultIconSize().height() * 2 ) );
     default:
         return QVariant();
     }
@@ -141,7 +130,7 @@ DeviceModel::swapDevice( Device* oldDevice, Device* newDevice )
 
     m_devices[ indexOfOldDevice ] = newDevice;
 
-    emit dataChanged( index( indexOfOldDevice ), index( indexOfOldDevice ) );
+    Q_EMIT dataChanged( index( indexOfOldDevice ), index( indexOfOldDevice ) );
 }
 
 void

@@ -1,21 +1,13 @@
-/*
- *   Copyright 2016, Luca Giambonini <almack@chakraos.org>
- *   Copyright 2016, Lisa Vitolo     <shainer@chakraos.org>
- *   Copyright 2017, Kyle Robbertze  <krobbertze@gmail.com>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   SPDX-FileCopyrightText: 2016 Luca Giambonini <almack@chakraos.org>
+ *   SPDX-FileCopyrightText: 2016 Lisa Vitolo     <shainer@chakraos.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze  <krobbertze@gmail.com>
+ *   SPDX-FileCopyrightText: 2017-2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef NETINSTALLPAGE_H
@@ -44,24 +36,9 @@ class NetInstallPage : public QWidget
     Q_OBJECT
 public:
     NetInstallPage( Config* config, QWidget* parent = nullptr );
-    virtual ~NetInstallPage();
-
-    /** @brief Sets the page title
-     *
-     * In situations where there is more than one netinstall page,
-     * or you want some explanatory title above the treeview,
-     * set the page title. This page takes ownership of the
-     * TranslatedString object.
-     *
-     * Set to nullptr to remove the title.
-     */
-    void setPageTitle( CalamaresUtils::Locale::TranslatedString* );
+    ~NetInstallPage() override;
 
     void onActivate();
-
-public slots:
-    void retranslate();
-    void setStatus( QString s );
 
     /** @brief Expand entries that should be pre-expanded.
      *
@@ -73,8 +50,6 @@ public slots:
 private:
     Config* m_config;
     Ui::Page_NetInst* ui;
-
-    std::unique_ptr< CalamaresUtils::Locale::TranslatedString > m_title;  // Above the treeview
 };
 
 #endif  // NETINSTALLPAGE_H

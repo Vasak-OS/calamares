@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PACKAGECHOOSERVIEWSTEP_H
@@ -24,12 +15,9 @@
 #include "utils/PluginFactory.h"
 #include "viewpages/ViewStep.h"
 
-#include "PackageModel.h"
-
-#include <QObject>
-#include <QUrl>
 #include <QVariantMap>
 
+class Config;
 class PackageChooserPage;
 
 class PLUGINDLLEXPORT PackageChooserViewStep : public Calamares::ViewStep
@@ -38,7 +26,7 @@ class PLUGINDLLEXPORT PackageChooserViewStep : public Calamares::ViewStep
 
 public:
     explicit PackageChooserViewStep( QObject* parent = nullptr );
-    virtual ~PackageChooserViewStep() override;
+    ~PackageChooserViewStep() override;
 
     QString prettyName() const override;
 
@@ -58,17 +46,10 @@ public:
     void setConfigurationMap( const QVariantMap& configurationMap ) override;
 
 private:
-    void fillModel( const QVariantList& items );
     void hookupModel();
 
+    Config* m_config;
     PackageChooserPage* m_widget;
-    PackageListModel* m_model;
-
-    // Configuration
-    PackageChooserMode m_mode;
-    QString m_id;
-    CalamaresUtils::Locale::TranslatedString* m_stepName;  // As it appears in the sidebar
-    QModelIndex m_defaultIdx;
 };
 
 CALAMARES_PLUGIN_FACTORY_DECLARATION( PackageChooserViewStepFactory )

@@ -1,20 +1,13 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2017, Adriaan de Groot <groot@kde.org>
- *   Copyright 2019, Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
+ *
  */
 
 #ifndef UTILS_UNITS_H
@@ -23,6 +16,9 @@
 #include <QtCore/QIntegerForSize>
 
 namespace CalamaresUtils
+{
+
+namespace Units
 {
 
 /** User defined literals, 1_KB is 1 KiloByte (= 10^3 bytes) */
@@ -61,40 +57,42 @@ constexpr qint64 operator""_GiB( unsigned long long m )
     return operator""_MiB(m)*1024;
 }
 
+}  // namespace Units
+
 constexpr qint64
 KBtoBytes( unsigned long long m )
 {
-    return operator""_KB( m );
+    return Units::operator""_KB( m );
 }
 
 constexpr qint64
 KiBtoBytes( unsigned long long m )
 {
-    return operator""_KiB( m );
+    return Units::operator""_KiB( m );
 }
 
 constexpr qint64
 MBtoBytes( unsigned long long m )
 {
-    return operator""_MB( m );
+    return Units::operator""_MB( m );
 }
 
 constexpr qint64
 MiBtoBytes( unsigned long long m )
 {
-    return operator""_MiB( m );
+    return Units::operator""_MiB( m );
 }
 
 constexpr qint64
 GBtoBytes( unsigned long long m )
 {
-    return operator""_GB( m );
+    return Units::operator""_GB( m );
 }
 
 constexpr qint64
 GiBtoBytes( unsigned long long m )
 {
-    return operator""_GiB( m );
+    return Units::operator""_GiB( m );
 }
 
 constexpr qint64
@@ -164,4 +162,5 @@ bytesToSectors( qint64 bytes, qint64 blocksize )
 }
 
 }  // namespace CalamaresUtils
+
 #endif

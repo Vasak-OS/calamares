@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2017, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, Adriaan de Groot <groot@kde.org>
- *   Copyright 2018-2019, Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-FileCopyrightText: 2014-2017 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2018-2019 Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "GlobalStorage.h"
@@ -30,53 +21,69 @@
 #include "core/PartitionActions.h"
 #include "core/PartitionInfo.h"
 
+#include "utils/Variant.h"
+
 #include <kpmcore/core/device.h>
 #include <kpmcore/core/partition.h>
 #include <kpmcore/fs/filesystem.h>
 
-static FileSystem::Type
-getDefaultFileSystemType()
-{
-    Calamares::GlobalStorage* gs = Calamares::JobQueue::instance()->globalStorage();
-    FileSystem::Type defaultFS = FileSystem::Ext4;
-
-    if ( gs->contains( "defaultFileSystemType" ) )
-    {
-        PartUtils::findFS( gs->value( "defaultFileSystemType" ).toString(), &defaultFS );
-        if ( defaultFS == FileSystem::Unknown )
-        {
-            defaultFS = FileSystem::Ext4;
-        }
-    }
-
-    return defaultFS;
-}
-
-PartitionLayout::PartitionLayout()
-{
-    m_defaultFsType = getDefaultFileSystemType();
-}
-
-PartitionLayout::PartitionLayout( PartitionLayout::PartitionEntry entry )
-{
-    m_defaultFsType = getDefaultFileSystemType();
-    m_partLayout.append( entry );
-}
+PartitionLayout::PartitionLayout() {}
 
 PartitionLayout::PartitionLayout( const PartitionLayout& layout )
-    : m_defaultFsType( layout.m_defaultFsType )
-    , m_partLayout( layout.m_partLayout )
+    : m_partLayout( layout.m_partLayout )
 {
 }
 
 PartitionLayout::~PartitionLayout() {}
 
+PartitionLayout::PartitionEntry::PartitionEntry()
+    : partAttributes( 0 )
+{
+}
+
+PartitionLayout::PartitionEntry::PartitionEntry( FileSystem::Type fs,
+                                                 const QString& mountPoint,
+                                                 const QString& size,
+                                                 const QString& minSize,
+                                                 const QString& maxSize )
+    : partAttributes( 0 )
+    , partMountPoint( mountPoint )
+    , partFileSystem( fs )
+    , partSize( size )
+    , partMinSize( minSize )
+    , partMaxSize( maxSize )
+{
+}
+
+PartitionLayout::PartitionEntry::PartitionEntry( const QString& label,
+                                                 const QString& uuid,
+                                                 const QString& type,
+                                                 quint64 attributes,
+                                                 const QString& mountPoint,
+                                                 const QString& fs,
+                                                 const QVariantMap& features,
+                                                 const QString& size,
+                                                 const QString& minSize,
+                                                 const QString& maxSize )
+    : partLabel( label )
+    , partUUID( uuid )
+    , partType( type )
+    , partAttributes( attributes )
+    , partMountPoint( mountPoint )
+    , partFeatures( features )
+    , partSize( size )
+    , partMinSize( minSize )
+    , partMaxSize( maxSize )
+{
+    PartUtils::canonicalFilesystemName( fs, &partFileSystem );
+}
+
+
 bool
-PartitionLayout::addEntry( PartitionLayout::PartitionEntry entry )
+PartitionLayout::addEntry( const PartitionEntry& entry )
 {
     if ( !entry.isValid() )
     {
-        cError() << "Partition size is invalid or has min size > max size";
         return false;
     }
 
@@ -85,179 +92,289 @@ PartitionLayout::addEntry( PartitionLayout::PartitionEntry entry )
     return true;
 }
 
-PartitionLayout::PartitionEntry::PartitionEntry( const QString& size, const QString& min, const QString& max )
-    : partSize( size )
-    , partMinSize( min )
-    , partMaxSize( max )
+void
+PartitionLayout::init( FileSystem::Type defaultFsType, const QVariantList& config )
 {
+    bool ok = true;  // bogus argument to getSubMap()
+
+    m_partLayout.clear();
+
+    for ( const auto& r : config )
+    {
+        QVariantMap pentry = r.toMap();
+
+        if ( !pentry.contains( "name" ) || !pentry.contains( "size" ) )
+        {
+            cError() << "Partition layout entry #" << config.indexOf( r )
+                     << "lacks mandatory attributes, switching to default layout.";
+            m_partLayout.clear();
+            break;
+        }
+
+        if ( !addEntry( { CalamaresUtils::getString( pentry, "name" ),
+                          CalamaresUtils::getString( pentry, "uuid" ),
+                          CalamaresUtils::getString( pentry, "type" ),
+                          CalamaresUtils::getUnsignedInteger( pentry, "attributes", 0 ),
+                          CalamaresUtils::getString( pentry, "mountPoint" ),
+                          CalamaresUtils::getString( pentry, "filesystem", "unformatted" ),
+                          CalamaresUtils::getSubMap( pentry, "features", ok ),
+                          CalamaresUtils::getString( pentry, "size", QStringLiteral( "0" ) ),
+                          CalamaresUtils::getString( pentry, "minSize", QStringLiteral( "0" ) ),
+                          CalamaresUtils::getString( pentry, "maxSize", QStringLiteral( "0" ) ) } ) )
+        {
+            cError() << "Partition layout entry #" << config.indexOf( r ) << "is invalid, switching to default layout.";
+            m_partLayout.clear();
+            break;
+        }
+    }
+
+    if ( !m_partLayout.count() )
+    {
+        // Unknown will be translated to defaultFsType at apply-time
+        addEntry( { FileSystem::Type::Unknown, QString( "/" ), QString( "100%" ) } );
+    }
+
+    setDefaultFsType( defaultFsType );
 }
 
-bool
-PartitionLayout::addEntry( const QString& mountPoint, const QString& size, const QString& min, const QString& max )
+void
+PartitionLayout::setDefaultFsType( FileSystem::Type defaultFsType )
 {
-    PartitionLayout::PartitionEntry entry( size, min, max );
-
-    if ( !entry.isValid() )
+    using FileSystem = FileSystem::Type;
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_CLANG( "-Wswitch-enum" )
+    switch ( defaultFsType )
     {
-        cError() << "Partition size" << size << "is invalid or" << min << ">" << max;
-        return false;
+    case FileSystem::Unknown:
+    case FileSystem::Unformatted:
+    case FileSystem::Extended:
+    case FileSystem::LinuxSwap:
+    case FileSystem::Luks:
+    case FileSystem::Ocfs2:
+    case FileSystem::Lvm2_PV:
+    case FileSystem::Udf:
+    case FileSystem::Iso9660:
+#ifdef WITH_KPMCORE4API
+    case FileSystem::Luks2:
+    case FileSystem::LinuxRaidMember:
+    case FileSystem::BitLocker:
+#endif
+        // bad bad
+        cWarning() << "The selected default FS" << defaultFsType << "is not suitable."
+                   << "Using ext4 instead.";
+        defaultFsType = FileSystem::Ext4;
+        break;
+    case FileSystem::Ext2:
+    case FileSystem::Ext3:
+    case FileSystem::Ext4:
+    case FileSystem::Fat32:
+    case FileSystem::Ntfs:
+    case FileSystem::Reiser4:
+    case FileSystem::ReiserFS:
+    case FileSystem::Xfs:
+    case FileSystem::Jfs:
+    case FileSystem::Btrfs:
+    case FileSystem::Exfat:
+    case FileSystem::F2fs:
+        // ok
+        break;
+    case FileSystem::Fat16:
+    case FileSystem::Hfs:
+    case FileSystem::HfsPlus:
+    case FileSystem::Ufs:
+    case FileSystem::Hpfs:
+    case FileSystem::Zfs:
+    case FileSystem::Nilfs2:
+#ifdef WITH_KPMCORE4API
+    case FileSystem::Fat12:
+    case FileSystem::Apfs:
+    case FileSystem::Minix:
+#endif
+        // weird
+        cWarning() << "The selected default FS" << defaultFsType << "is unusual, but not wrong.";
+        break;
+    default:
+        cWarning() << "The selected default FS" << defaultFsType << "is not known to Calamares."
+                   << "Using ext4 instead.";
+        defaultFsType = FileSystem::Ext4;
     }
-    if ( mountPoint.isEmpty() || !mountPoint.startsWith( QString( "/" ) ) )
-    {
-        cError() << "Partition mount point" << mountPoint << "is invalid";
-        return false;
-    }
+    QT_WARNING_POP
 
-    entry.partMountPoint = mountPoint;
-    entry.partFileSystem = m_defaultFsType;
-
-    m_partLayout.append( entry );
-
-    return true;
+    m_defaultFsType = defaultFsType;
 }
 
-bool
-PartitionLayout::addEntry( const QString& label,
-                           const QString& type,
-                           const QString& mountPoint,
-                           const QString& fs,
-                           const QVariantMap& features,
-                           const QString& size,
-                           const QString& min,
-                           const QString& max )
-{
-    PartitionLayout::PartitionEntry entry( size, min, max );
-
-    if ( !entry.isValid() )
-    {
-        cError() << "Partition size" << size << "is invalid or" << min << ">" << max;
-        return false;
-    }
-    if ( mountPoint.isEmpty() || !mountPoint.startsWith( QString( "/" ) ) )
-    {
-        cError() << "Partition mount point" << mountPoint << "is invalid";
-        return false;
-    }
-
-    entry.partLabel = label;
-    entry.partType = type;
-    entry.partMountPoint = mountPoint;
-    PartUtils::findFS( fs, &entry.partFileSystem );
-    if ( entry.partFileSystem == FileSystem::Unknown )
-    {
-        entry.partFileSystem = m_defaultFsType;
-    }
-    entry.partFeatures = features;
-
-    m_partLayout.append( entry );
-
-    return true;
-}
 
 QList< Partition* >
-PartitionLayout::execute( Device* dev,
-                          qint64 firstSector,
-                          qint64 lastSector,
-                          QString luksPassphrase,
-                          PartitionNode* parent,
-                          const PartitionRole& role )
+PartitionLayout::createPartitions( Device* dev,
+                                   qint64 firstSector,
+                                   qint64 lastSector,
+                                   QString luksPassphrase,
+                                   PartitionNode* parent,
+                                   const PartitionRole& role )
 {
+    // Make sure the default FS is sensible; warn and use ext4 if not
+    setDefaultFsType( m_defaultFsType );
+
     QList< Partition* > partList;
-    qint64 minSize, maxSize, end;
-    qint64 totalSize = lastSector - firstSector + 1;
-    qint64 availableSize = totalSize;
+    // Map each partition entry to its requested size (0 when calculated later)
+    QMap< const PartitionLayout::PartitionEntry*, qint64 > partSectorsMap;
+    const qint64 totalSectors = lastSector - firstSector + 1;
+    qint64 currentSector, availableSectors = totalSectors;
 
-    // TODO: Refine partition sizes to make sure there is room for every partition
-    // Use a default (200-500M ?) minimum size for partition without minSize
-
-    foreach ( const PartitionLayout::PartitionEntry& part, m_partLayout )
+    // Let's check if we have enough space for each partitions, using the size
+    // propery or the min-size property if unit is in percentage.
+    for ( const auto& entry : qAsConst( m_partLayout ) )
     {
-        Partition* currentPartition = nullptr;
-
-        qint64 size = -1;
-        // Calculate partition size
-        if ( part.partSize.isValid() )
+        if ( !entry.partSize.isValid() )
         {
-            size = part.partSize.toSectors( totalSize, dev->logicalSize() );
-        }
-        else
-        {
-            cWarning() << "Partition" << part.partMountPoint << "size (" << size << "sectors) is invalid, skipping...";
+            cWarning() << "Partition" << entry.partMountPoint << "size is invalid, skipping...";
             continue;
         }
 
-        if ( part.partMinSize.isValid() )
+        // Calculate partition size: Rely on "possibly uninitialized use"
+        // warnings to ensure that all the cases are covered below.
+        // We need to ignore the percent-defined until later
+        qint64 sectors = 0;
+        if ( entry.partSize.unit() != CalamaresUtils::Partition::SizeUnit::Percent )
         {
-            minSize = part.partMinSize.toSectors( totalSize, dev->logicalSize() );
+            sectors = entry.partSize.toSectors( totalSectors, dev->logicalSize() );
+        }
+        else if ( entry.partMinSize.isValid() )
+        {
+            sectors = entry.partMinSize.toSectors( totalSectors, dev->logicalSize() );
+        }
+        partSectorsMap.insert( &entry, sectors );
+        availableSectors -= sectors;
+    }
+
+    // There is not enough space for all partitions, use the min-size property
+    // and see if we can do better afterward.
+    if ( availableSectors < 0 )
+    {
+        availableSectors = totalSectors;
+        for ( const auto& entry : qAsConst( m_partLayout ) )
+        {
+            qint64 sectors = partSectorsMap.value( &entry );
+            if ( entry.partMinSize.isValid() )
+            {
+                sectors = entry.partMinSize.toSectors( totalSectors, dev->logicalSize() );
+                partSectorsMap.insert( &entry, sectors );
+            }
+            availableSectors -= sectors;
+        }
+    }
+
+    // Assign sectors for percentage-defined partitions.
+    for ( const auto& entry : qAsConst( m_partLayout ) )
+    {
+        if ( entry.partSize.unit() == CalamaresUtils::Partition::SizeUnit::Percent )
+        {
+            qint64 sectors
+                = entry.partSize.toSectors( availableSectors + partSectorsMap.value( &entry ), dev->logicalSize() );
+            if ( entry.partMinSize.isValid() )
+            {
+                sectors = std::max( sectors, entry.partMinSize.toSectors( totalSectors, dev->logicalSize() ) );
+            }
+            if ( entry.partMaxSize.isValid() )
+            {
+                sectors = std::min( sectors, entry.partMaxSize.toSectors( totalSectors, dev->logicalSize() ) );
+            }
+            partSectorsMap.insert( &entry, sectors );
+        }
+    }
+
+    auto correctFS = [ d = m_defaultFsType ]( FileSystem::Type t ) { return t == FileSystem::Type::Unknown ? d : t; };
+
+    // Create the partitions.
+    currentSector = firstSector;
+    availableSectors = totalSectors;
+    for ( const auto& entry : qAsConst( m_partLayout ) )
+    {
+        // Adjust partition size based on available space.
+        qint64 sectors = partSectorsMap.value( &entry );
+        sectors = std::min( sectors, availableSectors );
+        if ( sectors == 0 )
+        {
+            continue;
+        }
+
+        Partition* part = nullptr;
+
+        // Encryption for zfs is handled in the zfs module
+        if ( luksPassphrase.isEmpty() || correctFS( entry.partFileSystem ) == FileSystem::Zfs )
+        {
+            part = KPMHelpers::createNewPartition( parent,
+                                                   *dev,
+                                                   role,
+                                                   correctFS( entry.partFileSystem ),
+                                                   entry.partLabel,
+                                                   currentSector,
+                                                   currentSector + sectors - 1,
+                                                   KPM_PARTITION_FLAG( None ) );
         }
         else
         {
-            minSize = 0;
+            part = KPMHelpers::createNewEncryptedPartition( parent,
+                                                            *dev,
+                                                            role,
+                                                            correctFS( entry.partFileSystem ),
+                                                            entry.partLabel,
+                                                            currentSector,
+                                                            currentSector + sectors - 1,
+                                                            luksPassphrase,
+                                                            KPM_PARTITION_FLAG( None ) );
         }
 
-        if ( part.partMaxSize.isValid() )
+        // For zfs, we need to make the passphrase available to later modules
+        if ( correctFS( entry.partFileSystem ) == FileSystem::Zfs )
         {
-            maxSize = part.partMaxSize.toSectors( totalSize, dev->logicalSize() );
-        }
-        else
-        {
-            maxSize = availableSize;
+            Calamares::GlobalStorage* storage = Calamares::JobQueue::instance()->globalStorage();
+            QList< QVariant > zfsInfoList;
+            QVariantMap zfsInfo;
+
+            // Save the information subsequent modules will need
+            zfsInfo[ "encrypted" ] = !luksPassphrase.isEmpty();
+            zfsInfo[ "passphrase" ] = luksPassphrase;
+            zfsInfo[ "mountpoint" ] = entry.partMountPoint;
+
+            // Add it to the list and insert it into global storage
+            zfsInfoList.append( zfsInfo );
+            storage->insert( "zfsInfo", zfsInfoList );
         }
 
-        // Make sure we never go under minSize once converted to sectors
-        if ( maxSize < minSize )
+        PartitionInfo::setFormat( part, true );
+        PartitionInfo::setMountPoint( part, entry.partMountPoint );
+        if ( !entry.partLabel.isEmpty() )
         {
-            cWarning() << "Partition" << part.partMountPoint << "max size (" << maxSize << "sectors) is < min size ("
-                       << minSize << "sectors), using min size";
-            maxSize = minSize;
+            part->setLabel( entry.partLabel );
+            part->fileSystem().setLabel( entry.partLabel );
         }
-
-        // Adjust partition size based on user-defined boundaries and available space
-        if ( size < minSize )
+        if ( !entry.partUUID.isEmpty() )
         {
-            size = minSize;
+            part->setUUID( entry.partUUID );
         }
-        if ( size > maxSize )
-        {
-            size = maxSize;
-        }
-        if ( size > availableSize )
-        {
-            size = availableSize;
-        }
-        end = firstSector + size - 1;
-
-        if ( luksPassphrase.isEmpty() )
-        {
-            currentPartition = KPMHelpers::createNewPartition(
-                parent, *dev, role, part.partFileSystem, firstSector, end, KPM_PARTITION_FLAG( None ) );
-        }
-        else
-        {
-            currentPartition = KPMHelpers::createNewEncryptedPartition(
-                parent, *dev, role, part.partFileSystem, firstSector, end, luksPassphrase, KPM_PARTITION_FLAG( None ) );
-        }
-        PartitionInfo::setFormat( currentPartition, true );
-        PartitionInfo::setMountPoint( currentPartition, part.partMountPoint );
-        if ( !part.partLabel.isEmpty() )
-        {
-            currentPartition->setLabel( part.partLabel );
-            currentPartition->fileSystem().setLabel( part.partLabel );
-        }
-        if ( !part.partType.isEmpty() )
+        if ( !entry.partType.isEmpty() )
         {
 #if defined( WITH_KPMCORE42API )
-            currentPartition->setType( part.partType );
+            part->setType( entry.partType );
 #else
             cWarning() << "Ignoring type; requires KPMcore >= 4.2.0.";
 #endif
         }
-        if ( !part.partFeatures.isEmpty() )
+        if ( entry.partAttributes )
         {
 #if defined( WITH_KPMCORE42API )
-            for ( const auto& k : part.partFeatures.keys() )
+            part->setAttributes( entry.partAttributes );
+#else
+            cWarning() << "Ignoring attributes; requires KPMcore >= 4.2.0.";
+#endif
+        }
+        if ( !entry.partFeatures.isEmpty() )
+        {
+#if defined( WITH_KPMCORE42API )
+            for ( const auto& k : entry.partFeatures.keys() )
             {
-                currentPartition->fileSystem().addFeature( k, part.partFeatures.value( k ) );
+                part->fileSystem().addFeature( k, entry.partFeatures.value( k ) );
             }
 #else
             cWarning() << "Ignoring features; requires KPMcore >= 4.2.0.";
@@ -265,9 +382,9 @@ PartitionLayout::execute( Device* dev,
         }
         // Some buggy (legacy) BIOSes test if the bootflag of at least one partition is set.
         // Otherwise they ignore the device in boot-order, so add it here.
-        partList.append( currentPartition );
-        firstSector = end + 1;
-        availableSize -= size;
+        partList.append( part );
+        currentSector += sectors;
+        availableSectors -= sectors;
     }
 
     return partList;

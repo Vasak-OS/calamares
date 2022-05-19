@@ -1,20 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "Module.h"
@@ -47,10 +39,10 @@ Module::~Module() {}
 void
 Module::initFrom( const Calamares::ModuleSystem::Descriptor& moduleDescriptor, const QString& id )
 {
-    m_key = ModuleSystem::InstanceKey( moduleDescriptor.value( "name" ).toString(), id );
-    if ( moduleDescriptor.contains( EMERGENCY ) )
+    m_key = ModuleSystem::InstanceKey( moduleDescriptor.name(), id );
+    if ( moduleDescriptor.isEmergency() )
     {
-        m_maybe_emergency = moduleDescriptor[ EMERGENCY ].toBool();
+        m_maybe_emergency = true;
     }
 }
 
@@ -109,7 +101,7 @@ Module::loadConfigurationFile( const QString& configFileName )  //throws YAML::E
             YAML::Node doc = YAML::Load( ba.constData() );
             if ( doc.IsNull() )
             {
-                cDebug() << "Found empty module configuration" << path;
+                cWarning() << "Found empty module configuration" << path;
                 // Special case: empty config files are valid,
                 // but aren't a map.
                 return;
@@ -120,65 +112,30 @@ Module::loadConfigurationFile( const QString& configFileName )  //throws YAML::E
                 return;
             }
 
-            cDebug() << "Loaded module configuration" << path;
             m_configurationMap = CalamaresUtils::yamlMapToVariant( doc );
             m_emergency = m_maybe_emergency && m_configurationMap.contains( EMERGENCY )
                 && m_configurationMap[ EMERGENCY ].toBool();
             return;
         }
     }
-    cDebug() << "No config file for" << name() << "found anywhere at" << Logger::DebugList( configCandidates );
+    cWarning() << "No config file for" << name() << "found anywhere at" << Logger::DebugList( configCandidates );
 }
 
-
-static const NamedEnumTable< Module::Type >&
-typeNames()
-{
-    using Type = Module::Type;
-    // *INDENT-OFF*
-    // clang-format off
-    static const NamedEnumTable< Type > table{
-        { QStringLiteral( "job" ), Type::Job },
-        { QStringLiteral( "view" ), Type::View },
-        { QStringLiteral( "viewmodule" ), Type::View },
-        { QStringLiteral( "jobmodule" ), Type::Job }
-    };
-    // *INDENT-ON*
-    // clang-format on
-    return table;
-}
 
 QString
 Module::typeString() const
 {
     bool ok = false;
-    QString v = typeNames().find( type(), ok );
+    QString v = Calamares::ModuleSystem::typeNames().find( type(), ok );
     return ok ? v : QString();
 }
 
-
-static const NamedEnumTable< Module::Interface >&
-interfaceNames()
-{
-    using Interface = Module::Interface;
-    // *INDENT-OFF*
-    // clang-format off
-    static const NamedEnumTable< Interface > table {
-        { QStringLiteral("process"), Interface::Process },
-        { QStringLiteral("qtplugin"), Interface::QtPlugin },
-        { QStringLiteral("python"), Interface::Python },
-        { QStringLiteral("pythonqt"), Interface::PythonQt }
-    };
-    // *INDENT-ON*
-    // clang-format on
-    return table;
-}
 
 QString
 Module::interfaceString() const
 {
     bool ok = false;
-    QString v = interfaceNames().find( interface(), ok );
+    QString v = Calamares::ModuleSystem::interfaceNames().find( interface(), ok );
     return ok ? v : QString();
 }
 

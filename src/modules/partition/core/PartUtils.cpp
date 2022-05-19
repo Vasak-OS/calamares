@@ -1,26 +1,15 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2015-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018-2019 Adriaan de Groot <groot@kde.org>
- *   Copyright 2019, Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "PartUtils.h"
-
-#include "PartitionCoreModule.h"
 
 #include "core/DeviceModel.h"
 #include "core/KPMHelpers.h"
@@ -33,6 +22,7 @@
 #include "partition/PartitionQuery.h"
 #include "utils/CalamaresUtilsSystem.h"
 #include "utils/Logger.h"
+#include "utils/RAII.h"
 
 #include <kpmcore/backend/corebackend.h>
 #include <kpmcore/backend/corebackendmanager.h>
@@ -70,7 +60,7 @@ convenienceName( const Partition* const candidate )
 
     QString p;
     QTextStream s( &p );
-    s << (void*)candidate;
+    s << static_cast< const void* >( candidate );  // No good name available, use pointer address
 
     return p;
 }
@@ -83,15 +73,15 @@ getRequiredStorageGiB( bool& ok )
 }
 
 bool
-canBeReplaced( Partition* candidate )
+canBeReplaced( Partition* candidate, const Logger::Once& o )
 {
     if ( !candidate )
     {
-        cDebug() << "Partition* is NULL";
+        cDebug() << o << "Partition* is NULL";
         return false;
     }
 
-    cDebug() << "Checking if" << convenienceName( candidate ) << "can be replaced.";
+    cDebug() << o << "Checking if" << convenienceName( candidate ) << "can be replaced.";
     if ( candidate->isMounted() )
     {
         cDebug() << Logger::SubEntry << "NO, it is mounted.";
@@ -111,7 +101,7 @@ canBeReplaced( Partition* candidate )
 
     if ( availableStorageB > requiredStorageB )
     {
-        cDebug() << "Partition" << convenienceName( candidate ) << "authorized for replace install.";
+        cDebug() << o << "Partition" << convenienceName( candidate ) << "authorized for replace install.";
         return true;
     }
     else
@@ -128,31 +118,30 @@ canBeReplaced( Partition* candidate )
 
 
 bool
-canBeResized( Partition* candidate )
+canBeResized( Partition* candidate, const Logger::Once& o )
 {
     if ( !candidate )
     {
-        cDebug() << "Partition* is NULL";
+        cDebug() << o << "Partition* is NULL";
         return false;
     }
 
-    cDebug() << "Checking if" << convenienceName( candidate ) << "can be resized.";
     if ( !candidate->fileSystem().supportGrow() || !candidate->fileSystem().supportShrink() )
     {
-        cDebug() << Logger::SubEntry << "NO, filesystem" << candidate->fileSystem().name()
-                 << "does not support resize.";
+        cDebug() << o << "Can not resize" << convenienceName( candidate ) << ", filesystem"
+                 << candidate->fileSystem().name() << "does not support resize.";
         return false;
     }
 
     if ( isPartitionFreeSpace( candidate ) )
     {
-        cDebug() << Logger::SubEntry << "NO, partition is free space";
+        cDebug() << o << "Can not resize" << convenienceName( candidate ) << ", partition is free space";
         return false;
     }
 
     if ( candidate->isMounted() )
     {
-        cDebug() << Logger::SubEntry << "NO, partition is mounted";
+        cDebug() << o << "Can not resize" << convenienceName( candidate ) << ", partition is mounted";
         return false;
     }
 
@@ -161,14 +150,14 @@ canBeResized( Partition* candidate )
         PartitionTable* table = dynamic_cast< PartitionTable* >( candidate->parent() );
         if ( !table )
         {
-            cDebug() << Logger::SubEntry << "NO, no partition table found";
+            cDebug() << o << "Can not resize" << convenienceName( candidate ) << ", no partition table found";
             return false;
         }
 
         if ( table->numPrimaries() >= table->maxPrimaries() )
         {
-            cDebug() << Logger::SubEntry << "NO, partition table already has" << table->maxPrimaries()
-                     << "primary partitions.";
+            cDebug() << o << "Can not resize" << convenienceName( candidate ) << ", partition table already has"
+                     << table->maxPrimaries() << "primary partitions.";
             return false;
         }
     }
@@ -177,7 +166,8 @@ canBeResized( Partition* candidate )
     double requiredStorageGiB = getRequiredStorageGiB( ok );
     if ( !ok )
     {
-        cDebug() << Logger::SubEntry << "NO, requiredStorageGiB is not set correctly.";
+        cDebug() << o << "Can not resize" << convenienceName( candidate )
+                 << ", requiredStorageGiB is not set correctly.";
         return false;
     }
 
@@ -188,7 +178,8 @@ canBeResized( Partition* candidate )
 
     if ( availableStorageB > advisedStorageB )
     {
-        cDebug() << "Partition" << convenienceName( candidate ) << "authorized for resize + autopartition install.";
+        cDebug() << o << "Partition" << convenienceName( candidate )
+                 << "authorized for resize + autopartition install.";
         return true;
     }
     else
@@ -207,27 +198,27 @@ canBeResized( Partition* candidate )
 
 
 bool
-canBeResized( PartitionCoreModule* core, const QString& partitionPath )
+canBeResized( DeviceModel* dm, const QString& partitionPath, const Logger::Once& o )
 {
-    cDebug() << "Checking if" << partitionPath << "can be resized.";
-    QString partitionWithOs = partitionPath;
-    if ( partitionWithOs.startsWith( "/dev/" ) )
+    if ( partitionPath.startsWith( "/dev/" ) )
     {
-        DeviceModel* dm = core->deviceModel();
         for ( int i = 0; i < dm->rowCount(); ++i )
         {
             Device* dev = dm->deviceForIndex( dm->index( i ) );
-            Partition* candidate = CalamaresUtils::Partition::findPartitionByPath( { dev }, partitionWithOs );
+            Partition* candidate = CalamaresUtils::Partition::findPartitionByPath( { dev }, partitionPath );
             if ( candidate )
             {
-                return canBeResized( candidate );
+                return canBeResized( candidate, o );
             }
         }
-        cDebug() << Logger::SubEntry << "no Partition* found for" << partitionWithOs;
+        cWarning() << "Can not resize" << partitionPath << ", no Partition* found.";
+        return false;
     }
-
-    cDebug() << Logger::SubEntry << "Partition" << partitionWithOs << "CANNOT BE RESIZED FOR AUTOINSTALL.";
-    return false;
+    else
+    {
+        cWarning() << "Can not resize" << partitionPath << ", does not start with /dev";
+        return false;
+    }
 }
 
 
@@ -260,8 +251,6 @@ lookForFstabEntries( const QString& partitionPath )
     {
         QFile fstabFile( mount.path() + "/etc/fstab" );
 
-        cDebug() << Logger::SubEntry << "reading" << fstabFile.fileName();
-
         if ( fstabFile.open( QIODevice::ReadOnly | QIODevice::Text ) )
         {
             const QStringList fstabLines = QString::fromLocal8Bit( fstabFile.readAll() ).split( '\n' );
@@ -271,10 +260,11 @@ lookForFstabEntries( const QString& partitionPath )
                 fstabEntries.append( FstabEntry::fromEtcFstab( rawLine ) );
             }
             fstabFile.close();
-            cDebug() << Logger::SubEntry << "got" << fstabEntries.count() << "lines.";
+            const int lineCount = fstabEntries.count();
             std::remove_if(
                 fstabEntries.begin(), fstabEntries.end(), []( const FstabEntry& x ) { return !x.isValid(); } );
-            cDebug() << Logger::SubEntry << "got" << fstabEntries.count() << "fstab entries.";
+            cDebug() << Logger::SubEntry << "got" << fstabEntries.count() << "fstab entries from" << lineCount
+                     << "lines in" << fstabFile.fileName();
         }
         else
         {
@@ -367,8 +357,10 @@ findPartitionPathForMountPoint( const FstabEntryList& fstab, const QString& moun
 
 
 OsproberEntryList
-runOsprober( PartitionCoreModule* core )
+runOsprober( DeviceModel* dm )
 {
+    Logger::Once o;
+
     QString osproberOutput;
     QProcess osprober;
     osprober.setProgram( "os-prober" );
@@ -405,28 +397,42 @@ runOsprober( PartitionCoreModule* core )
                 prettyName = lineColumns.value( 2 ).simplified();
             }
 
-            QString path = lineColumns.value( 0 ).simplified();
+            QString file, path = lineColumns.value( 0 ).simplified();
             if ( !path.startsWith( "/dev/" ) )  //basic sanity check
             {
                 continue;
             }
 
+            // strip extra file after device: /dev/name@/path/to/file
+            int index = path.indexOf( '@' );
+            if ( index != -1 )
+            {
+                file = path.right( path.length() - index - 1 );
+                path = path.left( index );
+            }
+
             FstabEntryList fstabEntries = lookForFstabEntries( path );
             QString homePath = findPartitionPathForMountPoint( fstabEntries, "/home" );
 
-            osproberEntries.append(
-                { prettyName, path, QString(), canBeResized( core, path ), lineColumns, fstabEntries, homePath } );
+            osproberEntries.append( { prettyName,
+                                      path,
+                                      file,
+                                      QString(),
+                                      canBeResized( dm, path, o ),
+                                      lineColumns,
+                                      fstabEntries,
+                                      homePath } );
             osproberCleanLines.append( line );
         }
     }
 
     if ( osproberCleanLines.count() > 0 )
     {
-        cDebug() << "os-prober lines after cleanup:" << Logger::DebugList( osproberCleanLines );
+        cDebug() << o << "os-prober lines after cleanup:" << Logger::DebugList( osproberCleanLines );
     }
     else
     {
-        cDebug() << "os-prober gave no output.";
+        cDebug() << o << "os-prober gave no output.";
     }
 
     Calamares::JobQueue::instance()->globalStorage()->insert( "osproberLines", osproberCleanLines );
@@ -441,56 +447,121 @@ isEfiSystem()
 }
 
 bool
+isEfiFilesystemSuitableType( const Partition* candidate )
+{
+    auto type = candidate->fileSystem().type();
+
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_CLANG( "-Wswitch-enum" )
+    switch ( type )
+    {
+    case FileSystem::Type::Fat32:
+        return true;
+#ifdef WITH_KPMCORE4API
+    case FileSystem::Type::Fat12:
+#endif
+    case FileSystem::Type::Fat16:
+        cWarning() << "FAT12 and FAT16 are probably not supported by EFI";
+        return false;
+    default:
+        cWarning() << "EFI boot partition must be FAT32";
+        return false;
+    }
+    QT_WARNING_POP
+}
+
+bool
+isEfiFilesystemSuitableSize( const Partition* candidate )
+{
+    auto size = candidate->capacity();  // bytes
+    if ( size <= 0 )
+    {
+        return false;
+    }
+
+    if ( size_t( size ) >= efiFilesystemMinimumSize() )
+    {
+        return true;
+    }
+    else
+    {
+        cWarning() << "Filesystem for EFI is too small (" << size << "bytes)";
+        return false;
+    }
+}
+
+
+bool
 isEfiBootable( const Partition* candidate )
 {
-    cDebug() << "Check EFI bootable" << convenienceName( candidate ) << candidate->devicePath();
-    cDebug() << Logger::SubEntry << "flags" << candidate->activeFlags();
+    const auto flags = PartitionInfo::flags( candidate );
 
-    auto flags = PartitionInfo::flags( candidate );
-
-    /* If bit 17 is set, old-style Esp flag, it's OK */
+#if defined( WITH_KPMCORE4API )
+    // In KPMCore4, the flags are remapped, and the ESP flag is the same as Boot.
+    static_assert( KPM_PARTITION_FLAG_ESP == KPM_PARTITION_FLAG( Boot ), "KPMCore API enum changed" );
+    return flags.testFlag( KPM_PARTITION_FLAG_ESP );
+#else
+    // In KPMCore3, bit 17 is the old-style Esp flag, and it's OK
     if ( flags.testFlag( KPM_PARTITION_FLAG_ESP ) )
     {
         return true;
     }
 
     /* Otherwise, if it's a GPT table, Boot (bit 0) is the same as Esp */
-    const PartitionNode* root = candidate;
-    while ( root && !root->isRoot() )
+    const PartitionTable* table = CalamaresUtils::Partition::getPartitionTable( candidate );
+    if ( !table )
     {
-        root = root->parent();
-        cDebug() << Logger::SubEntry << "moved towards root" << (void*)root;
-    }
-
-    // Strange case: no root found, no partition table node?
-    if ( !root )
-    {
+        cWarning() << "Root of partition table is not a PartitionTable object";
         return false;
     }
-
-    const PartitionTable* table = dynamic_cast< const PartitionTable* >( root );
-    cDebug() << Logger::SubEntry << "partition table" << (void*)table << "type"
-             << ( table ? table->type() : PartitionTable::TableType::unknownTableType );
-    return table && ( table->type() == PartitionTable::TableType::gpt ) && flags.testFlag( KPM_PARTITION_FLAG( Boot ) );
+    if ( table->type() == PartitionTable::TableType::gpt )
+    {
+        const auto bootFlag = KPM_PARTITION_FLAG( Boot );
+        return flags.testFlag( bootFlag );
+    }
+    return false;
+#endif
 }
 
-QString
-findFS( QString fsName, FileSystem::Type* fsType )
+// TODO: this is configurable via the config file **already**
+size_t
+efiFilesystemMinimumSize()
 {
-    QStringList fsLanguage { QLatin1String( "C" ) };  // Required language list to turn off localization
+    using CalamaresUtils::Units::operator""_MiB;
+
+    size_t uefisys_part_sizeB = 300_MiB;
+
+    // The default can be overridden; the key used here comes
+    // from the partition module Config.cpp
+    auto* gs = Calamares::JobQueue::instance()->globalStorage();
+    if ( gs->contains( "efiSystemPartitionSize_i" ) )
+    {
+        qint64 v = gs->value( "efiSystemPartitionSize_i" ).toLongLong();
+        uefisys_part_sizeB = v > 0 ? static_cast< size_t >( v ) : 0;
+    }
+    // There is a lower limit of what can be configured
+    if ( uefisys_part_sizeB < 32_MiB )
+    {
+        uefisys_part_sizeB = 32_MiB;
+    }
+    return uefisys_part_sizeB;
+}
+
+
+QString
+canonicalFilesystemName( const QString& fsName, FileSystem::Type* fsType )
+{
+    cScopedAssignment type( fsType );
     if ( fsName.isEmpty() )
     {
-        fsName = QStringLiteral( "ext4" );
+        type = FileSystem::Ext4;
+        return QStringLiteral( "ext4" );
     }
 
-    FileSystem::Type tmpType = FileSystem::typeForName( fsName, fsLanguage );
-    if ( tmpType != FileSystem::Unknown )
+    QStringList fsLanguage { QLatin1String( "C" ) };  // Required language list to turn off localization
+
+    if ( ( type = FileSystem::typeForName( fsName, fsLanguage ) ) != FileSystem::Unknown )
     {
-        cDebug() << "Found filesystem" << fsName;
-        if ( fsType )
-        {
-            *fsType = tmpType;
-        }
         return fsName;
     }
 
@@ -501,7 +572,6 @@ findFS( QString fsName, FileSystem::Type* fsType )
         if ( 0 == QString::compare( fsName, FileSystem::nameForType( t, fsLanguage ), Qt::CaseInsensitive ) )
         {
             QString fsRealName = FileSystem::nameForType( t, fsLanguage );
-            cDebug() << "Filesystem name" << fsName << "translated to" << fsRealName;
             if ( fsType )
             {
                 *fsType = t;
@@ -510,8 +580,7 @@ findFS( QString fsName, FileSystem::Type* fsType )
         }
     }
 
-    cDebug() << "Filesystem" << fsName << "not found, using ext4";
-    fsName = QStringLiteral( "ext4" );
+    cWarning() << "Filesystem" << fsName << "not found, using ext4";
     // fsType can be used to check whether fsName was a valid filesystem.
     if ( fsType )
     {
@@ -531,7 +600,8 @@ findFS( QString fsName, FileSystem::Type* fsType )
         }
     }
 #endif
-    return fsName;
+    type = FileSystem::Unknown;
+    return QStringLiteral( "ext4" );
 }
 
 }  // namespace PartUtils

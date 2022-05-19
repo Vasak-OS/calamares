@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright (c) 2017, Kyle Robbertze <kyle@aims.ac.za>
- *   Copyright 2017, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Kyle Robbertze <kyle@aims.ac.za>
+ *   SPDX-FileCopyrightText: 2017 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "PackageTreeItem.h"
@@ -61,15 +52,27 @@ PackageTreeItem::PackageTreeItem( const QString& packageName, PackageTreeItem* p
 {
 }
 
-PackageTreeItem::PackageTreeItem( const QVariantMap& groupData, PackageTreeItem* parent )
-    : m_parentItem( parent )
+PackageTreeItem::PackageTreeItem( const QVariantMap& groupData, PackageTag&& parent )
+    : m_parentItem( parent.parent )
+    , m_packageName( CalamaresUtils::getString( groupData, "name" ) )
+    , m_selected( parentCheckState( parent.parent ) )
+    , m_description( CalamaresUtils::getString( groupData, "description" ) )
+    , m_isGroup( false )
+    , m_isCritical( parent.parent ? parent.parent->isCritical() : false )
+    , m_showReadOnly( parent.parent ? parent.parent->isImmutable() : false )
+{
+}
+
+PackageTreeItem::PackageTreeItem( const QVariantMap& groupData, GroupTag&& parent )
+    : m_parentItem( parent.parent )
     , m_name( CalamaresUtils::getString( groupData, "name" ) )
-    , m_selected( parentCheckState( parent ) )
+    , m_selected( parentCheckState( parent.parent ) )
     , m_description( CalamaresUtils::getString( groupData, "description" ) )
     , m_preScript( CalamaresUtils::getString( groupData, "pre-install" ) )
     , m_postScript( CalamaresUtils::getString( groupData, "post-install" ) )
+    , m_source( CalamaresUtils::getString( groupData, "source" ) )
     , m_isGroup( true )
-    , m_isCritical( parentCriticality( groupData, parent ) )
+    , m_isCritical( parentCriticality( groupData, parent.parent ) )
     , m_isHidden( CalamaresUtils::getBool( groupData, "hidden", false ) )
     , m_showReadOnly( CalamaresUtils::getBool( groupData, "immutable", false ) )
     , m_startExpanded( CalamaresUtils::getBool( groupData, "expanded", false ) )
@@ -120,27 +123,16 @@ PackageTreeItem::row() const
 QVariant
 PackageTreeItem::data( int column ) const
 {
-    if ( isPackage() )  // packages have a packagename, groups don't
+    switch ( column )
     {
-        switch ( column )
-        {
-        case 0:
-            return QVariant( packageName() );
-        default:
-            return QVariant();
-        }
-    }
-    else
-    {
-        switch ( column )  // group
-        {
-        case 0:
-            return QVariant( name() );
-        case 1:
-            return QVariant( description() );
-        default:
-            return QVariant();
-        }
+    case 0:
+        // packages have a packagename, groups don't
+        return QVariant( isPackage() ? packageName() : name() );
+    case 1:
+        // packages often have a blank description
+        return QVariant( description() );
+    default:
+        return QVariant();
     }
 }
 
@@ -255,6 +247,19 @@ PackageTreeItem::setChildrenSelected( Qt::CheckState isSelected )
             child->m_selected = isSelected;
             child->setChildrenSelected( isSelected );
         }
+}
+
+void
+PackageTreeItem::removeChild( int row )
+{
+    if ( 0 <= row && row < m_childItems.count() )
+    {
+        m_childItems.removeAt( row );
+    }
+    else
+    {
+        cWarning() << "Attempt to remove invalid child in removeChild() at row " << row;
+    }
 }
 
 int

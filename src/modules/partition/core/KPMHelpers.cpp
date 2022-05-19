@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014,      Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015-2016, Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2014      Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
  *   Copyright 2018-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "core/KPMHelpers.h"
@@ -24,13 +15,15 @@
 
 #include "partition/PartitionIterator.h"
 #include "utils/Logger.h"
+#include "utils/String.h"
 
-// KPMcore
 #include <kpmcore/backend/corebackendmanager.h>
 #include <kpmcore/core/device.h>
 #include <kpmcore/core/partition.h>
+#include <kpmcore/fs/filesystem.h>
 #include <kpmcore/fs/filesystemfactory.h>
 #include <kpmcore/fs/luks.h>
+#include <kpmcore/util/externalcommand.h>
 
 using CalamaresUtils::Partition::PartitionIterator;
 
@@ -55,11 +48,13 @@ createNewPartition( PartitionNode* parent,
                     const Device& device,
                     const PartitionRole& role,
                     FileSystem::Type fsType,
+                    const QString& fsLabel,
                     qint64 firstSector,
                     qint64 lastSector,
                     PartitionTable::Flags flags )
 {
     FileSystem* fs = FileSystemFactory::create( fsType, firstSector, lastSector, device.logicalSize() );
+    fs->setLabel( fsLabel );
     return new Partition( parent,
                           device,
                           role,
@@ -80,6 +75,7 @@ createNewEncryptedPartition( PartitionNode* parent,
                              const Device& device,
                              const PartitionRole& role,
                              FileSystem::Type fsType,
+                             const QString& fsLabel,
                              qint64 firstSector,
                              qint64 lastSector,
                              const QString& passphrase,
@@ -101,6 +97,7 @@ createNewEncryptedPartition( PartitionNode* parent,
 
     fs->createInnerFileSystem( fsType );
     fs->setPassphrase( passphrase );
+    fs->setLabel( fsLabel );
     Partition* p = new Partition( parent,
                                   device,
                                   PartitionRole( newRoles ),
@@ -131,5 +128,138 @@ clonePartition( Device* device, Partition* partition )
                           partition->partitionPath(),
                           partition->activeFlags() );
 }
+
+#ifndef WITH_KPMCORE4API
+// This function was added in KPMCore 4, implementation copied from src/fs/luks.cpp
+/*
+    SPDX-FileCopyrightText: 2010 Volker Lanz <vl@fidra.de>
+    SPDX-FileCopyrightText: 2012-2019 Andrius Štikonas <andrius@stikonas.eu>
+    SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
+    SPDX-FileCopyrightText: 2016 Chantara Tith <tith.chantara@gmail.com>
+    SPDX-FileCopyrightText: 2017 Christian Morlok <christianmorlok@gmail.com>
+    SPDX-FileCopyrightText: 2018 Caio Jordão Carvalho <caiojcarvalho@gmail.com>
+    SPDX-FileCopyrightText: 2020 Arnaud Ferraris <arnaud.ferraris@collabora.com>
+    SPDX-FileCopyrightText: 2020 Gaël PORTAY <gael.portay@collabora.com>
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+static bool
+testPassphrase( FS::luks* fs, const QString& deviceNode, const QString& passphrase )
+{
+    ExternalCommand cmd( QStringLiteral( "cryptsetup" ),
+                         { QStringLiteral( "open" ),
+                           QStringLiteral( "--tries" ),
+                           QStringLiteral( "1" ),
+                           QStringLiteral( "--test-passphrase" ),
+                           deviceNode } );
+    if ( cmd.write( passphrase.toLocal8Bit() + '\n' ) && cmd.start( -1 ) && cmd.exitCode() == 0 )
+    {
+        return true;
+    }
+
+    return false;
+}
+#else
+static bool
+testPassphrase( FS::luks* fs, const QString& deviceNode, const QString& passphrase )
+{
+    return fs->testPassphrase( deviceNode, passphrase );
+}
+#endif
+
+// Adapted from luks cryptOpen which always opens a dialog to ask for a passphrase
+int
+updateLuksDevice( Partition* partition, const QString& passphrase )
+{
+    const QString deviceNode = partition->partitionPath();
+
+    cDebug() << "Update Luks device: " << deviceNode;
+
+    if ( passphrase.isEmpty() )
+    {
+        cWarning() << Logger::SubEntry << "#1: Passphrase is empty";
+        return 1;
+    }
+
+    if ( partition->fileSystem().type() != FileSystem::Luks )
+    {
+        cWarning() << Logger::SubEntry << "#2: Not a luks encrypted device";
+        return 2;
+    }
+
+    // Cast partition fs to luks fs
+    FS::luks* luksFs = dynamic_cast< FS::luks* >( &partition->fileSystem() );
+
+    // Test the given passphrase
+    if ( !testPassphrase( luksFs, deviceNode, passphrase ) )
+    {
+        cWarning() << Logger::SubEntry << "#3: Passphrase incorrect";
+        return 3;
+    }
+
+    if ( luksFs->isCryptOpen() )
+    {
+        if ( !luksFs->mapperName().isEmpty() )
+        {
+            cWarning() << Logger::SubEntry << "#4: Device already decrypted";
+            return 4;
+        }
+        else
+        {
+            cDebug() << Logger::SubEntry << "No mapper node found";
+            luksFs->setCryptOpen( false );
+        }
+    }
+
+    ExternalCommand openCmd( QStringLiteral( "cryptsetup" ),
+                             { QStringLiteral( "open" ), deviceNode, luksFs->suggestedMapperName( deviceNode ) } );
+
+    if ( !( openCmd.write( passphrase.toLocal8Bit() + '\n' ) && openCmd.start( -1 ) && openCmd.exitCode() == 0 ) )
+    {
+        cWarning() << Logger::SubEntry << openCmd.exitCode() << ": cryptsetup command failed";
+        return openCmd.exitCode();
+    }
+
+    // Save the existing passphrase
+    luksFs->setPassphrase( passphrase );
+
+    luksFs->scan( deviceNode );
+
+    if ( luksFs->mapperName().isEmpty() )
+    {
+        cWarning() << Logger::SubEntry << "#5: No mapper node found";
+        return 5;
+    }
+
+    luksFs->loadInnerFileSystem( luksFs->mapperName() );
+    luksFs->setCryptOpen( luksFs->innerFS() != nullptr );
+
+    if ( !luksFs->isCryptOpen() )
+    {
+        cWarning() << Logger::SubEntry << "#6: Device could not be decrypted";
+        return 6;
+    }
+
+    return 0;
+}
+
+Calamares::JobResult
+execute( Operation& operation, const QString& failureMessage )
+{
+    operation.setStatus( Operation::StatusRunning );
+
+    Report report( nullptr );
+    if ( operation.execute( report ) )
+    {
+        return Calamares::JobResult::ok();
+    }
+
+    // Remove the === lines from the report by trimming them to empty
+    QStringList l = report.toText().split( '\n' );
+    std::for_each( l.begin(), l.end(), []( QString& s ) { CalamaresUtils::removeLeading( s, '=' ); } );
+
+    return Calamares::JobResult::error( failureMessage, l.join( '\n' ) );
+}
+
 
 }  // namespace KPMHelpers

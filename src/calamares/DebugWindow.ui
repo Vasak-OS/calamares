@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <author>
+SPDX-FileCopyrightText: 2015 Teo Mrnjavac &lt;teo@kde.org&gt;
+SPDX-License-Identifier: GPL-3.0-or-later
+ </author>
  <class>Calamares::DebugWindow</class>
  <widget class="QWidget" name="Calamares::DebugWindow">
   <property name="geometry">
@@ -17,7 +21,7 @@
    <item>
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
-      <number>2</number>
+      <number>0</number>
      </property>
      <widget class="QWidget" name="globalStorageTab">
       <attribute name="title">
@@ -52,7 +56,7 @@
          <item>
           <layout class="QFormLayout" name="formLayout">
            <item row="0" column="0">
-            <widget class="QLabel" name="label">
+            <widget class="QLabel" name="typeLabel">
              <property name="text">
               <string>Type:</string>
              </property>
@@ -66,7 +70,7 @@
             </widget>
            </item>
            <item row="1" column="0">
-            <widget class="QLabel" name="label_2">
+            <widget class="QLabel" name="interfaceLabel">
              <property name="text">
               <string>Interface:</string>
              </property>
@@ -88,48 +92,63 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="toolsTab">
-      <attribute name="title">
-       <string>Tools</string>
-      </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_4">
-       <item>
-        <widget class="QPushButton" name="crashButton">
-         <property name="text">
-          <string notr="true">Crash now</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="reloadStylesheetButton">
-         <property name="text">
-          <string>Reload Stylesheet</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="widgetTreeButton">
-         <property name="text">
-          <string>Widget Tree</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <spacer name="verticalSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-      </layout>
-     </widget>
     </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_2">
+     <item>
+      <widget class="QPushButton" name="crashButton">
+       <property name="toolTip">
+        <string>Crashes Calamares, so that Dr. Konqui can look at it.</string>
+       </property>
+       <property name="text">
+        <string notr="true">Crash now</string>
+       </property>
+       <property name="icon">
+        <iconset theme="data-error"/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="reloadStylesheetButton">
+       <property name="toolTip">
+        <string>Reloads the stylesheet from the branding directory.</string>
+       </property>
+       <property name="text">
+        <string>Reload Stylesheet</string>
+       </property>
+       <property name="icon">
+        <iconset theme="preferences-web-browser-stylesheets"/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="widgetTreeButton">
+       <property name="toolTip">
+        <string>Displays the tree of widget names in the log (for stylesheet debugging).</string>
+       </property>
+       <property name="text">
+        <string>Widget Tree</string>
+       </property>
+       <property name="icon">
+        <iconset theme="view-list-tree"/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="sendLogButton">
+       <property name="toolTip">
+        <string>Uploads the session log to the configured pastebin.</string>
+       </property>
+       <property name="text">
+        <string>Send Session Log</string>
+       </property>
+       <property name="icon">
+        <iconset theme="upload-media"/>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>

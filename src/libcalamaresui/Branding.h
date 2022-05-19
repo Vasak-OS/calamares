@@ -1,34 +1,29 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, Adriaan de Groot <groot@kde.org>
- *   Copyright 2018, Raul Rodrigo Segura (raurodse)
- *   Copyright 2019, Camilo Higuita <milo.h@aol.com>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2018 Raul Rodrigo Segura (raurodse)
+ *   SPDX-FileCopyrightText: 2019 Camilo Higuita <milo.h@aol.com>
+ *   SPDX-FileCopyrightText: 2021 Anubhav Choudhary <ac.10edu@gmail.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef BRANDING_H
 #define BRANDING_H
 
+#include "CalamaresConfig.h"
 #include "DllMacro.h"
-
 #include "utils/NamedSuffix.h"
 
 #include <QMap>
 #include <QObject>
+#include <QPixmap>
+#include <QSize>
 #include <QStringList>
+#include <QUrl>
 
 namespace YAML
 {
@@ -49,6 +44,7 @@ public:
      * e.g. *Branding::ProductName to get the string value for
      * the product name.
      */
+
     enum StringEntry
     {
         ProductName,
@@ -61,16 +57,18 @@ public:
         ProductUrl,
         SupportUrl,
         KnownIssuesUrl,
-        ReleaseNotesUrl
+        ReleaseNotesUrl,
+        DonateUrl
     };
     Q_ENUM( StringEntry )
 
     enum ImageEntry : short
     {
-        ProductLogo,
+        ProductBanner,
         ProductIcon,
-        ProductWelcome,
-        ProductWallpaper
+        ProductLogo,
+        ProductWallpaper,
+        ProductWelcome
     };
     Q_ENUM( ImageEntry )
 
@@ -79,9 +77,22 @@ public:
         SidebarBackground,
         SidebarText,
         SidebarTextSelect,
-        SidebarTextHighlight
+        SidebarTextSelected = SidebarTextSelect,  // TODO:3.3:Remove SidebarTextSelect
+        SidebarTextHighlight,
+        SidebarBackgroundSelected = SidebarTextHighlight  // TODO:3.3:Remove SidebarTextHighlight
     };
     Q_ENUM( StyleEntry )
+
+    /** @brief Supported log-upload servers.
+     *
+     * 'None' is here as a fallback.
+     */
+    enum UploadServerType : short
+    {
+        None,
+        Fiche
+    };
+    Q_ENUM( UploadServerType )
 
     /** @brief Setting for how much the main window may expand. */
     enum class WindowExpansion
@@ -127,8 +138,11 @@ public:
     enum class PanelFlavor
     {
         None,
-        Widget,
+        Widget
+#ifdef WITH_QML
+        ,
         Qml
+#endif
     };
     Q_ENUM( PanelFlavor )
     ///@brief Where to place a panel (sidebar, navigation)
@@ -161,8 +175,16 @@ public:
      */
     QString translationsDirectory() const { return m_translationsPathPrefix; }
 
-    /** @brief Path to the slideshow QML file, if any. */
+    /** @brief Path to the slideshow QML file, if any. (API == 1 or 2)*/
     QString slideshowPath() const { return m_slideshowPath; }
+    /// @brief List of pathnames of slideshow images, if any. (API == -1)
+    QStringList slideshowImages() const { return m_slideshowFilenames; }
+    /** @brief Which slideshow API to use for the slideshow?
+     *
+     *  -  2    For QML-based slideshows loaded asynchronously (current)
+     *  -  1    For QML-based slideshows, loaded when shown (legacy)
+     *  - -1    For oldschool image-slideshows.
+     */
     int slideshowAPI() const { return m_slideshowAPI; }
 
     QPixmap image( Branding::ImageEntry imageEntry, const QSize& size ) const;
@@ -175,6 +197,13 @@ public:
      * May return a null pixmap if nothing is found.
      */
     QPixmap image( const QString& name, const QSize& size ) const;
+
+    /** @brief Look up image with alternate names
+     *
+     * Calls image() for each name in the @p list and returns the first
+     * one that is non-null. May return a null pixmap if nothing is found.
+     */
+    QPixmap image( const QStringList& list, const QSize& size ) const;
 
     /** @brief Stylesheet to apply for this branding. May be empty.
      *
@@ -199,6 +228,22 @@ public:
     ///@brief Which navigation flavor is configured
     PanelFlavor navigationFlavor() const { return m_navigationFlavor; }
 
+    /** @brief Upload server configuration
+     *
+     * This object has 3 items : the type (which may be none, in which case the URL
+     * is irrelevant and usually empty), the URL for the upload and the size limit of upload
+     * in bytes (for configuration value < 0, it serves -1, which stands for having no limit).
+     */
+    struct UploadServerInfo
+    {
+        UploadServerType type;
+        QUrl url;
+        qint64 size;
+
+        operator bool() const { return type != Calamares::Branding::UploadServerType::None && size != 0; }
+    };
+    UploadServerInfo uploadServer() const { return m_uploadServer; }
+
     /**
      * Creates a map called "branding" in the global storage, and inserts an
      * entry for each of the branding strings. This makes the branding
@@ -208,6 +253,11 @@ public:
 
 public slots:
     QString string( StringEntry stringEntry ) const;
+    QString versionedName() const { return string( VersionedName ); }
+    QString productName() const { return string( ProductName ); }
+    QString shortProductName() const { return string( ShortProductName ); }
+    QString shortVersionedName() const { return string( ShortVersionedName ); }
+
     QString styleString( StyleEntry styleEntry ) const;
     QString imagePath( ImageEntry imageEntry ) const;
 
@@ -220,20 +270,32 @@ private:
     static const QStringList s_stringEntryStrings;
     static const QStringList s_imageEntryStrings;
     static const QStringList s_styleEntryStrings;
-
-    [[noreturn]] void bail( const QString& message );
+    static const QStringList s_uploadServerStrings;
 
     QString m_descriptorPath;  // Path to descriptor (e.g. "/etc/calamares/default/branding.desc")
     QString m_componentName;  // Matches last part of full path to containing directory
     QMap< QString, QString > m_strings;
     QMap< QString, QString > m_images;
     QMap< QString, QString > m_style;
+    UploadServerInfo m_uploadServer;
+
+    /* The slideshow can be done in one of two ways:
+     *  - as a sequence of images
+     *  - as a QML file
+     * The slideshow: setting selects which one is used. If it is
+     * a list (of filenames) then it is a sequence of images, and otherwise
+     * it is a QML file which is run. (For QML, the slideshow API is
+     * important).
+     */
+    QStringList m_slideshowFilenames;
     QString m_slideshowPath;
     int m_slideshowAPI;
     QString m_translationsPathPrefix;
 
     /** @brief Initialize the simple settings below */
     void initSimpleSettings( const YAML::Node& doc );
+    ///@brief Initialize the slideshow settings, above
+    void initSlideshowSettings( const YAML::Node& doc );
 
     bool m_welcomeStyleCalamares;
     bool m_welcomeExpandingLogo;
@@ -247,12 +309,6 @@ private:
     PanelSide m_sidebarSide = PanelSide::Left;
     PanelSide m_navigationSide = PanelSide::Bottom;
 };
-
-template < typename U >
-inline QString operator*( U e )
-{
-    return Branding::instance()->string( e );
-}
 
 }  // namespace Calamares
 

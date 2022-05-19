@@ -1,27 +1,22 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "Config.h"
 #include "PackageModel.h"
 #include "PackageTreeItem.h"
 
 #include "utils/Logger.h"
+#include "utils/NamedEnum.h"
 #include "utils/Variant.h"
 #include "utils/Yaml.h"
+
+#include <KMacroExpander>
 
 #include <QtTest/QtTest>
 
@@ -30,7 +25,7 @@ class ItemTests : public QObject
     Q_OBJECT
 public:
     ItemTests();
-    virtual ~ItemTests() {}
+    ~ItemTests() override {}
 
 private:
     void checkAllSelected( PackageTreeItem* p );
@@ -41,11 +36,17 @@ private Q_SLOTS:
     void initTestCase();
 
     void testRoot();
+
     void testPackage();
+    void testExtendedPackage();
+
     void testGroup();
     void testCompare();
     void testModel();
     void testExampleFiles();
+
+    void testUrlFallback_data();
+    void testUrlFallback();
 };
 
 ItemTests::ItemTests() {}
@@ -77,6 +78,7 @@ ItemTests::testPackage()
     QCOMPARE( p.isSelected(), Qt::Unchecked );
     QCOMPARE( p.packageName(), QStringLiteral( "bash" ) );
     QVERIFY( p.name().isEmpty() );  // not a group
+    QVERIFY( p.description().isEmpty() );
     QCOMPARE( p.parentItem(), nullptr );
     QCOMPARE( p.childCount(), 0 );
     QVERIFY( !p.isHidden() );
@@ -127,6 +129,33 @@ static const char doc_with_expanded[] =
 // clang-format on
 
 void
+ItemTests::testExtendedPackage()
+{
+    YAML::Node yamldoc = YAML::Load( doc );
+    QVariantList yamlContents = CalamaresUtils::yamlSequenceToVariant( yamldoc );
+
+    QCOMPARE( yamlContents.length(), 1 );
+
+    // Kind of derpy, but we can treat a group as if it is a package
+    // because the keys name and description are the same
+    PackageTreeItem p( yamlContents[ 0 ].toMap(), PackageTreeItem::PackageTag { nullptr } );
+
+    QCOMPARE( p.isSelected(), Qt::Unchecked );
+    QCOMPARE( p.packageName(), QStringLiteral( "CCR" ) );
+    QVERIFY( p.name().isEmpty() );  // not a group
+    QVERIFY( !p.description().isEmpty() );  // because it is set
+    QVERIFY( p.description().startsWith( QStringLiteral( "Tools for the Chakra" ) ) );
+    QCOMPARE( p.parentItem(), nullptr );
+    QCOMPARE( p.childCount(), 0 );
+    QVERIFY( !p.isHidden() );
+    QVERIFY( !p.isCritical() );
+    QVERIFY( !p.isGroup() );
+    QVERIFY( p.isPackage() );
+    QVERIFY( p == p );
+}
+
+
+void
 ItemTests::testGroup()
 {
     YAML::Node yamldoc = YAML::Load( doc );
@@ -134,7 +163,7 @@ ItemTests::testGroup()
 
     QCOMPARE( yamlContents.length(), 1 );
 
-    PackageTreeItem p( yamlContents[ 0 ].toMap(), nullptr );
+    PackageTreeItem p( yamlContents[ 0 ].toMap(), PackageTreeItem::GroupTag { nullptr } );
     QCOMPARE( p.name(), QStringLiteral( "CCR" ) );
     QVERIFY( p.packageName().isEmpty() );
     QVERIFY( p.description().startsWith( QStringLiteral( "Tools " ) ) );
@@ -147,7 +176,7 @@ ItemTests::testGroup()
     QVERIFY( !p.isPackage() );
     QVERIFY( p == p );
 
-    PackageTreeItem c( "zsh", nullptr );
+    PackageTreeItem c( "zsh", nullptr );  // Single string, package
     QVERIFY( p != c );
 }
 
@@ -184,15 +213,17 @@ ItemTests::testCompare()
     QVariantList yamlContents = CalamaresUtils::yamlSequenceToVariant( yamldoc );
     QCOMPARE( yamlContents.length(), 1 );
 
-    PackageTreeItem p3( yamlContents[ 0 ].toMap(), nullptr );
+    PackageTreeItem p3( yamlContents[ 0 ].toMap(), PackageTreeItem::GroupTag { nullptr } );
     QVERIFY( p3 == p3 );
     QVERIFY( p3 != p1 );
     QVERIFY( p1 != p3 );
     QCOMPARE( p3.childCount(), 0 );  // Doesn't load the packages: list
 
-    PackageTreeItem p4( CalamaresUtils::yamlSequenceToVariant( YAML::Load( doc ) )[ 0 ].toMap(), nullptr );
+    PackageTreeItem p4( CalamaresUtils::yamlSequenceToVariant( YAML::Load( doc ) )[ 0 ].toMap(),
+                        PackageTreeItem::GroupTag { nullptr } );
     QVERIFY( p3 == p4 );
-    PackageTreeItem p5( CalamaresUtils::yamlSequenceToVariant( YAML::Load( doc_no_packages ) )[ 0 ].toMap(), nullptr );
+    PackageTreeItem p5( CalamaresUtils::yamlSequenceToVariant( YAML::Load( doc_no_packages ) )[ 0 ].toMap(),
+                        PackageTreeItem::GroupTag { nullptr } );
     QVERIFY( p3 == p5 );
 }
 
@@ -300,6 +331,93 @@ ItemTests::testExampleFiles()
 
         // TODO: should test *something* about this file :/
     }
+}
+
+void
+ItemTests::testUrlFallback_data()
+{
+    QTest::addColumn< QString >( "filename" );
+    QTest::addColumn< int >( "status" );
+    QTest::addColumn< int >( "count" );
+
+    using S = Config::Status;
+
+    QTest::newRow( "bad" ) << "1a-single-bad.conf" << smash( S::FailedBadConfiguration ) << 0;
+    QTest::newRow( "empty" ) << "1a-single-empty.conf" << smash( S::FailedNoData ) << 0;
+    QTest::newRow( "error" ) << "1a-single-error.conf" << smash( S::FailedBadData ) << 0;
+    QTest::newRow( "two" ) << "1b-single-small.conf" << smash( S::Ok ) << 2;
+    QTest::newRow( "five" ) << "1b-single-large.conf" << smash( S::Ok ) << 5;
+    QTest::newRow( "none" ) << "1c-none.conf" << smash( S::FailedNoData ) << 0;
+    QTest::newRow( "unset" ) << "1c-unset.conf" << smash( S::FailedNoData ) << 0;
+    // Finds small, then stops
+    QTest::newRow( "fallback-small" ) << "1d-fallback-small.conf" << smash( S::Ok ) << 2;
+    // Finds large, then stops
+    QTest::newRow( "fallback-large" ) << "1d-fallback-large.conf" << smash( S::Ok ) << 5;
+    // Finds empty, finds small
+    QTest::newRow( "fallback-mixed" ) << "1d-fallback-mixed.conf" << smash( S::Ok ) << 2;
+    // Finds empty, then bad
+    QTest::newRow( "fallback-bad" ) << "1d-fallback-bad.conf" << smash( S::FailedBadConfiguration ) << 0;
+}
+
+void
+ItemTests::testUrlFallback()
+{
+    Logger::setupLogLevel( Logger::LOGDEBUG );
+    QFETCH( QString, filename );
+    QFETCH( int, status );
+    QFETCH( int, count );
+
+    cDebug() << "Loading" << filename;
+
+    // BUILD_AS_TEST is the source-directory path
+    QString testdir = QString( "%1/tests" ).arg( BUILD_AS_TEST );
+    QFile fi( QString( "%1/%2" ).arg( testdir, filename ) );
+    QVERIFY( fi.exists() );
+
+    Config c;
+
+    QFile yamlFile( fi.fileName() );
+    if ( yamlFile.exists() && yamlFile.open( QFile::ReadOnly | QFile::Text ) )
+    {
+        QString ba( yamlFile.readAll() );
+        QVERIFY( ba.length() > 0 );
+        QHash< QString, QString > replace;
+        replace.insert( "TESTDIR", testdir );
+        QString correctedDocument = KMacroExpander::expandMacros( ba, replace, '$' );
+
+        try
+        {
+            YAML::Node yamldoc = YAML::Load( correctedDocument.toUtf8() );
+            auto map = CalamaresUtils::yamlToVariant( yamldoc ).toMap();
+            QVERIFY( map.count() > 0 );
+            c.setConfigurationMap( map );
+        }
+        catch ( YAML::Exception& )
+        {
+            bool badYaml = true;
+            QVERIFY( !badYaml );
+        }
+    }
+    else
+    {
+        QCOMPARE( QStringLiteral( "not found" ), fi.fileName() );
+    }
+
+    // Each of the configs sets required to **true**, which is not the default
+    QVERIFY( c.required() );
+
+    // Now give the loader time to complete
+    QEventLoop loop;
+    connect( &c, &Config::statusReady, &loop, &QEventLoop::quit );
+    QSignalSpy spy( &c, &Config::statusReady );
+    QTimer::singleShot( std::chrono::seconds( 1 ), &loop, &QEventLoop::quit );
+    loop.exec();
+
+    // Check it didn't time out
+    QCOMPARE( spy.count(), 1 );
+    // Check YAML-loading results
+    QCOMPARE( smash( c.statusCode() ), status );
+    QCOMPARE( c.model()->rowCount(), count );
 }
 
 

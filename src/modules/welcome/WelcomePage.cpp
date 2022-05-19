@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2015,      Anke Boersma <demm@kaosx.us>
- *   Copyright 2017-2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Anke Boersma <demm@kaosx.us>
+ *   SPDX-FileCopyrightText: 2017-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "WelcomePage.h"
@@ -29,12 +20,13 @@
 #include "Settings.h"
 #include "ViewManager.h"
 
-#include "locale/LabelModel.h"
 #include "modulesystem/ModuleManager.h"
+#include "modulesystem/RequirementsModel.h"
 #include "utils/CalamaresUtilsGui.h"
 #include "utils/Logger.h"
 #include "utils/NamedEnum.h"
 #include "utils/Retranslator.h"
+#include "widgets/TranslationFix.h"
 
 #include <QApplication>
 #include <QBoxLayout>
@@ -44,44 +36,56 @@
 #include <QLabel>
 #include <QMessageBox>
 
-WelcomePage::WelcomePage( Config* conf, QWidget* parent )
+WelcomePage::WelcomePage( Config* config, QWidget* parent )
     : QWidget( parent )
     , ui( new Ui::WelcomePage )
-    , m_checkingWidget( new CheckerContainer( conf->requirementsModel(), this ) )
+    , m_checkingWidget( new CheckerContainer( config, this ) )
     , m_languages( nullptr )
-    , m_conf( conf )
+    , m_conf( config )
 {
+    using Branding = Calamares::Branding;
 
+    const int defaultFontHeight = CalamaresUtils::defaultFontHeight();
+    ui->setupUi( this );
+    ui->aboutButton->setIcon( CalamaresUtils::defaultPixmap(
+        CalamaresUtils::Information, CalamaresUtils::Original, 2 * QSize( defaultFontHeight, defaultFontHeight ) ) );
+
+    // insert system-check widget below welcome text
+    const int welcome_text_idx = ui->verticalLayout->indexOf( ui->mainText );
+    ui->verticalLayout->insertWidget( welcome_text_idx + 1, m_checkingWidget );
+
+    // insert optional logo banner image above welcome text
+    QString bannerPath = Branding::instance()->imagePath( Branding::ProductBanner );
+    if ( !bannerPath.isEmpty() )
+    {
+        // If the name is not empty, the file exists -- Branding checks that at startup
+        QPixmap bannerPixmap = QPixmap( bannerPath );
+        if ( !bannerPixmap.isNull() )
+        {
+            QLabel* bannerLabel = new QLabel;
+            bannerLabel->setPixmap( bannerPixmap );
+            bannerLabel->setMinimumHeight( 64 );
+            bannerLabel->setAlignment( Qt::AlignCenter );
+            ui->aboveTextSpacer->changeSize( 20, defaultFontHeight );  // Shrink it down
+            ui->aboveTextSpacer->invalidate();
+            ui->verticalLayout->insertSpacing( welcome_text_idx, defaultFontHeight );
+            ui->verticalLayout->insertWidget( welcome_text_idx, bannerLabel );
+        }
+    }
+
+    initLanguages();
+
+    CALAMARES_RETRANSLATE_SLOT( &WelcomePage::retranslate );
+
+    connect( ui->aboutButton, &QPushButton::clicked, this, &WelcomePage::showAboutBox );
     connect( Calamares::ModuleManager::instance(),
              &Calamares::ModuleManager::requirementsComplete,
              m_checkingWidget,
              &CheckerContainer::requirementsComplete );
-    connect( Calamares::ModuleManager::instance(),
-             &Calamares::ModuleManager::requirementsProgress,
+    connect( Calamares::ModuleManager::instance()->requirementsModel(),
+             &Calamares::RequirementsModel::progressMessageChanged,
              m_checkingWidget,
              &CheckerContainer::requirementsProgress );
-    ui->setupUi( this );
-
-    ui->verticalLayout->insertSpacing( 1, CalamaresUtils::defaultFontHeight() * 2 );
-    initLanguages();
-
-    ui->mainText->setAlignment( Qt::AlignCenter );
-    ui->mainText->setWordWrap( true );
-    ui->mainText->setOpenExternalLinks( true );
-
-    cDebug() << "Welcome string" << Calamares::Branding::instance()->welcomeStyleCalamares()
-             << *Calamares::Branding::VersionedName;
-
-    CALAMARES_RETRANSLATE_SLOT( &WelcomePage::retranslate )
-
-    ui->aboutButton->setIcon( CalamaresUtils::defaultPixmap(
-        CalamaresUtils::Information,
-        CalamaresUtils::Original,
-        2 * QSize( CalamaresUtils::defaultFontHeight(), CalamaresUtils::defaultFontHeight() ) ) );
-    connect( ui->aboutButton, &QPushButton::clicked, this, &WelcomePage::showAboutBox );
-
-    int welcome_text_idx = ui->verticalLayout->indexOf( ui->mainText );
-    ui->verticalLayout->insertWidget( welcome_text_idx + 1, m_checkingWidget );
 }
 
 void
@@ -146,7 +150,7 @@ WelcomePage::setupButton( Button role, const QString& url )
     }
     if ( !button )
     {
-        qWarning() << "Unknown button role" << smash( role );
+        cWarning() << "Unknown button role" << smash( role );
         return;
     }
 
@@ -161,11 +165,11 @@ WelcomePage::setupButton( Button role, const QString& url )
     {
         auto size = 2 * QSize( CalamaresUtils::defaultFontHeight(), CalamaresUtils::defaultFontHeight() );
         button->setIcon( CalamaresUtils::defaultPixmap( icon, CalamaresUtils::Original, size ) );
-        connect( button, &QPushButton::clicked, [u]() { QDesktopServices::openUrl( u ); } );
+        connect( button, &QPushButton::clicked, [ u ]() { QDesktopServices::openUrl( u ); } );
     }
     else
     {
-        qWarning() << "Welcome button" << smash( role ) << "URL" << url << "is invalid.";
+        cWarning() << "Welcome button" << smash( role ) << "URL" << url << "is invalid.";
         button->hide();
     }
 }
@@ -219,9 +223,9 @@ WelcomePage::retranslate()
             : tr( "<h1>Welcome to the %1 installer.</h1>" );
     }
 
-    ui->mainText->setText( message.arg( *Calamares::Branding::VersionedName ) );
+    ui->mainText->setText( message.arg( Calamares::Branding::instance()->versionedName() ) );
     ui->retranslateUi( this );
-    ui->supportButton->setText( tr( "%1 support" ).arg( *Calamares::Branding::ShortProductName ) );
+    ui->supportButton->setText( tr( "%1 support" ).arg( Calamares::Branding::instance()->shortProductName() ) );
 }
 
 void
@@ -245,9 +249,10 @@ WelcomePage::showAboutBox()
                         "Liberating Software." )
                         .arg( CALAMARES_APPLICATION_NAME )
                         .arg( CALAMARES_VERSION )
-                        .arg( *Calamares::Branding::VersionedName ),
+                        .arg( Calamares::Branding::instance()->versionedName() ),
                     QMessageBox::Ok,
                     this );
+    Calamares::fixButtonLabels( &mb );
     mb.setIconPixmap( CalamaresUtils::defaultPixmap(
         CalamaresUtils::Squid,
         CalamaresUtils::Original,
@@ -271,5 +276,5 @@ LocaleTwoColumnDelegate::paint( QPainter* painter, const QStyleOptionViewItem& o
         Qt::AlignRight | Qt::AlignVCenter,
         option.palette,
         false,
-        index.data( CalamaresUtils::Locale::LabelModel::EnglishLabelRole ).toString() );
+        index.data( CalamaresUtils::Locale::TranslationsModel::EnglishLabelRole ).toString() );
 }

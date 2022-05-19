@@ -1,8 +1,14 @@
 /*   GENERATED FILE DO NOT EDIT
 *
-*  === This file is part of Calamares - <https://github.com/calamares> ===
+*  === This file is part of Calamares - <https://calamares.io> ===
 *
-* This file is derived from CLDR data from Unicode, Inc. Applicable terms:
+* SPDX-FileCopyrightText: 1991-2019 Unicode, Inc.
+* SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+* SPDX-License-Identifier: CC0-1.0
+*
+* This file is derived from CLDR data from Unicode, Inc. Applicable terms
+* are listed at http://unicode.org/copyright.html , of which the most
+* important are:
 *
 * A. Unicode Copyright
 *    1. Copyright © 1991-2019 Unicode, Inc. All rights reserved.
@@ -10,6 +16,11 @@
 *    Unicode Data Files ("DATA FILES") include all data files under the directories:
 *    https://www.unicode.org/Public/
 * C. Terms of Use
+*    1. Certain documents and files on this website contain a legend indicating
+*       that "Modification is permitted." Any person is hereby authorized,
+*       without fee, to modify such documents and files to create derivative
+*       works conforming to the Unicode® Standard, subject to Terms and
+*       Conditions herein.
 *    2. Any person is hereby authorized, without fee, to view, use, reproduce,
 *       and distribute all documents and files, subject to the Terms and
 *       Conditions herein.
@@ -18,7 +29,9 @@
 /*  MODIFICATIONS
  *
  * Edited anyway:
- *      20191211 India changed to AnyLanguage, since Hindi doesn't make sense. #1284
+ *      20191211 India (IN) changed to AnyLanguage, since Hindi doesn't make sense. #1284
+ *      20210207 Belarus (BY) changed to Russian, as the more-common-language. #1634
+ *      20210615 Tokelau and Tuvalu country enum values changed to avoid deprecation warning.
  *
  */
 
@@ -66,7 +79,7 @@ static const CountryData country_data_table[] = {
 { QLocale::Language::Portuguese, QLocale::Country::Brazil, 'B', 'R' },
 { QLocale::Language::Dzongkha, QLocale::Country::Bhutan, 'B', 'T' },
 { QLocale::Language::AnyLanguage, QLocale::Country::BouvetIsland, 'B', 'V' },
-{ QLocale::Language::Belarusian, QLocale::Country::Belarus, 'B', 'Y' },
+{ QLocale::Language::Russian, QLocale::Country::Belarus, 'B', 'Y' },
 { QLocale::Language::Swahili, QLocale::Country::CongoKinshasa, 'C', 'D' },
 { QLocale::Language::French, QLocale::Country::CentralAfricanRepublic, 'C', 'F' },
 { QLocale::Language::French, QLocale::Country::CongoBrazzaville, 'C', 'G' },
@@ -212,13 +225,13 @@ static const CountryData country_data_table[] = {
 { QLocale::Language::French, QLocale::Country::Togo, 'T', 'G' },
 { QLocale::Language::Thai, QLocale::Country::Thailand, 'T', 'H' },
 { QLocale::Language::Tajik, QLocale::Country::Tajikistan, 'T', 'J' },
-{ QLocale::Language::TokelauLanguage, QLocale::Country::Tokelau, 'T', 'K' },
+{ QLocale::Language::TokelauLanguage, QLocale::Country::TokelauCountry, 'T', 'K' },
 { QLocale::Language::Portuguese, QLocale::Country::EastTimor, 'T', 'L' },
 { QLocale::Language::Turkmen, QLocale::Country::Turkmenistan, 'T', 'M' },
 { QLocale::Language::Arabic, QLocale::Country::Tunisia, 'T', 'N' },
 { QLocale::Language::Tongan, QLocale::Country::Tonga, 'T', 'O' },
 { QLocale::Language::Turkish, QLocale::Country::Turkey, 'T', 'R' },
-{ QLocale::Language::TuvaluLanguage, QLocale::Country::Tuvalu, 'T', 'V' },
+{ QLocale::Language::TuvaluLanguage, QLocale::Country::TuvaluCountry, 'T', 'V' },
 { QLocale::Language::Chinese, QLocale::Country::Taiwan, 'T', 'W' },
 { QLocale::Language::Swahili, QLocale::Country::Tanzania, 'T', 'Z' },
 { QLocale::Language::Ukrainian, QLocale::Country::Ukraine, 'U', 'A' },

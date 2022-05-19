@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "QmlViewStep.h"
@@ -58,7 +49,7 @@ changeQMLState( QMLAction action, QQuickItem* item )
     static const char propertyName[] = "activatedInCalamares";
 
     bool activate = action == QMLAction::Start;
-    CalamaresUtils::callQMLFunction( item, activate ? "onActivate" : "onLeave" );
+    CalamaresUtils::callQmlFunction( item, activate ? "onActivate" : "onLeave" );
 
     auto property = item->property( propertyName );
     if ( property.isValid() && ( property.type() == QVariant::Bool ) && ( property.toBool() != activate ) )
@@ -76,7 +67,7 @@ QmlViewStep::QmlViewStep( QObject* parent )
     , m_spinner( new WaitingWidget( tr( "Loading ..." ) ) )
     , m_qmlWidget( new QQuickWidget )
 {
-    CalamaresUtils::registerCalamaresModels();
+    CalamaresUtils::registerQmlModels();
 
     QVBoxLayout* layout = new QVBoxLayout( m_widget );
     layout->addWidget( m_spinner );
@@ -151,6 +142,22 @@ QmlViewStep::widget()
     return m_widget;
 }
 
+QSize
+QmlViewStep::widgetMargins( Qt::Orientations panelSides )
+{
+    // If any panels around it, use the standard, but if all the
+    // panels are hidden, like on full-screen with subsumed navigation,
+    // then no margins.
+    if ( panelSides )
+    {
+        return ViewStep::widgetMargins( panelSides );
+    }
+    else
+    {
+        return QSize( 0, 0 );
+    }
+}
+
 void
 QmlViewStep::loadComplete()
 {
@@ -161,7 +168,7 @@ QmlViewStep::loadComplete()
     }
     if ( m_qmlComponent->isReady() && !m_qmlObject )
     {
-        cDebug() << "QML component complete" << m_qmlFileName;
+        cDebug() << Logger::SubEntry << "QML component complete" << m_qmlFileName << "creating object";
         // Don't do this again
         disconnect( m_qmlComponent, &QQmlComponent::statusChanged, this, &QmlViewStep::loadComplete );
 
@@ -189,7 +196,7 @@ QmlViewStep::showQml()
 {
     if ( !m_qmlWidget || !m_qmlObject )
     {
-        cDebug() << "showQml() called but no QML object";
+        cWarning() << "showQml() called but no QML object";
         return;
     }
     if ( m_spinner )
@@ -201,7 +208,7 @@ QmlViewStep::showQml()
     }
     else
     {
-        cDebug() << "showQml() called twice";
+        cWarning() << "showQml() called twice";
     }
 
     if ( ViewManager::instance()->currentStep() == this )
@@ -221,7 +228,7 @@ QmlViewStep::setConfigurationMap( const QVariantMap& configurationMap )
         = CalamaresUtils::qmlSearchNames().find( CalamaresUtils::getString( configurationMap, "qmlSearch" ), ok );
     if ( !ok )
     {
-        cDebug() << "Bad QML search mode.";
+        cWarning() << "Bad QML search mode set for" << moduleInstanceKey();
     }
 
     QString qmlFile = CalamaresUtils::getString( configurationMap, "qmlFilename" );
@@ -246,7 +253,7 @@ QmlViewStep::setConfigurationMap( const QVariantMap& configurationMap )
     }
     else
     {
-        cWarning() << "QML configuration set after component has loaded.";
+        cWarning() << "QML configuration set after component" << moduleInstanceKey() << "has loaded.";
     }
 }
 

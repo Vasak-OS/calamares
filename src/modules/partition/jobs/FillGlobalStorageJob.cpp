@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017, 2019-2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 2019-2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "FillGlobalStorageJob.h"
@@ -27,6 +18,7 @@
 #include "GlobalStorage.h"
 #include "JobQueue.h"
 #include "partition/FileSystem.h"
+#include "partition/Global.h"
 #include "partition/PartitionIterator.h"
 #include "utils/Logger.h"
 
@@ -91,9 +83,16 @@ mapForPartition( Partition* partition, const QString& uuid )
 {
     QVariantMap map;
     map[ "device" ] = partition->partitionPath();
+    map[ "partlabel" ] = partition->label();
+    map[ "partuuid" ] = partition->uuid();
     map[ "mountPoint" ] = PartitionInfo::mountPoint( partition );
     map[ "fsName" ] = userVisibleFS( partition->fileSystem() );
     map[ "fs" ] = untranslatedFS( partition->fileSystem() );
+#ifdef WITH_KPMCORE42API
+    map[ "parttype" ] = partition->type();
+    map[ "partattrs" ] = partition->attributes();
+    map[ "features" ] = partition->fileSystem().features();
+#endif
     if ( partition->fileSystem().type() == FileSystem::Luks
          && dynamic_cast< FS::luks& >( partition->fileSystem() ).innerFS() )
     {
@@ -105,12 +104,19 @@ mapForPartition( Partition* partition, const QString& uuid )
     // Debugging for inside the loop in createPartitionList(),
     // so indent a bit
     Logger::CDebug deb;
-    using TR = Logger::DebugRow< const char* const, const QString& >;
+    using TR = Logger::DebugRow< const char* const, const QString >;
+    // clang-format off
     deb << Logger::SubEntry << "mapping for" << partition->partitionPath() << partition->deviceNode()
-        << TR( "mtpoint:", PartitionInfo::mountPoint( partition ) ) << TR( "fs:", map[ "fs" ].toString() )
-        << TR( "fsName", map[ "fsName" ].toString() ) << TR( "uuid", uuid )
+        << TR( "partlabel", map[ "partlabel" ].toString() )
+        << TR( "partition-uuid (partuuid)", Logger::RedactedName( "PartUUID", map[ "partuuid" ].toString() ) )
+        << TR( "parttype", map[ "parttype" ].toString() )
+        << TR( "partattrs", map[ "partattrs" ].toString() )
+        << TR( "mountPoint:", PartitionInfo::mountPoint( partition ) )
+        << TR( "fs:", map[ "fs" ].toString() )
+        << TR( "fsName", map[ "fsName" ].toString() )
+        << TR( "filesystem-uuid (uuid)", Logger::RedactedName( "FSUUID", uuid ) )
         << TR( "claimed", map[ "claimed" ].toString() );
-
+    // clang-format on
     if ( partition->roles().has( PartitionRole::Luks ) )
     {
         const FileSystem& fsRef = partition->fileSystem();
@@ -127,7 +133,34 @@ mapForPartition( Partition* partition, const QString& uuid )
     return map;
 }
 
-FillGlobalStorageJob::FillGlobalStorageJob( QList< Device* > devices, const QString& bootLoaderPath )
+static QString
+prettyFileSystemFeatures( const QVariantMap& features )
+{
+    QStringList list;
+    for ( const auto& key : features.keys() )
+    {
+        const auto& value = features.value( key );
+        if ( value.type() == QVariant::Bool )
+        {
+            if ( value.toBool() )
+            {
+                list += key;
+            }
+            else
+            {
+                list += QString( "not " ) + key;
+            }
+        }
+        else
+        {
+            list += key + QString( "=" ) + value.toString();
+        }
+    }
+
+    return list.join( QStringLiteral( ", " ) );
+}
+
+FillGlobalStorageJob::FillGlobalStorageJob( const Config*, QList< Device* > devices, const QString& bootLoaderPath )
     : m_devices( devices )
     , m_bootLoaderPath( bootLoaderPath )
 {
@@ -154,7 +187,8 @@ FillGlobalStorageJob::prettyDescription() const
             QString path = partitionMap.value( "device" ).toString();
             QString mountPoint = partitionMap.value( "mountPoint" ).toString();
             QString fsType = partitionMap.value( "fs" ).toString();
-            if ( mountPoint.isEmpty() || fsType.isEmpty() )
+            QString features = prettyFileSystemFeatures( partitionMap.value( "features" ).toMap() );
+            if ( mountPoint.isEmpty() || fsType.isEmpty() || fsType == QString( "unformatted" ) )
             {
                 continue;
             }
@@ -162,34 +196,82 @@ FillGlobalStorageJob::prettyDescription() const
             {
                 if ( mountPoint == "/" )
                 {
-                    lines.append( tr( "Install %1 on <strong>new</strong> %2 system partition." )
-                                      .arg( *Calamares::Branding::ShortProductName )
-                                      .arg( fsType ) );
+                    if ( !features.isEmpty() )
+                    {
+                        lines.append( tr( "Install %1 on <strong>new</strong> %2 system partition "
+                                          "with features <em>%3</em>" )
+                                          .arg( Calamares::Branding::instance()->shortProductName() )
+                                          .arg( fsType )
+                                          .arg( features ) );
+                    }
+                    else
+                    {
+                        lines.append( tr( "Install %1 on <strong>new</strong> %2 system partition." )
+                                          .arg( Calamares::Branding::instance()->shortProductName() )
+                                          .arg( fsType ) );
+                    }
                 }
                 else
                 {
-                    lines.append( tr( "Set up <strong>new</strong> %2 partition with mount point "
-                                      "<strong>%1</strong>." )
-                                      .arg( mountPoint )
-                                      .arg( fsType ) );
+                    if ( !features.isEmpty() )
+                    {
+                        lines.append( tr( "Set up <strong>new</strong> %2 partition with mount point "
+                                          "<strong>%1</strong> and features <em>%3</em>." )
+                                          .arg( mountPoint )
+                                          .arg( fsType )
+                                          .arg( features ) );
+                    }
+                    else
+                    {
+                        lines.append( tr( "Set up <strong>new</strong> %2 partition with mount point "
+                                          "<strong>%1</strong>%3." )
+                                          .arg( mountPoint )
+                                          .arg( fsType )
+                                          .arg( features ) );
+                    }
                 }
             }
             else
             {
                 if ( mountPoint == "/" )
                 {
-                    lines.append( tr( "Install %2 on %3 system partition <strong>%1</strong>." )
-                                      .arg( path )
-                                      .arg( *Calamares::Branding::ShortProductName )
-                                      .arg( fsType ) );
+                    if ( !features.isEmpty() )
+                    {
+                        lines.append( tr( "Install %2 on %3 system partition <strong>%1</strong>"
+                                          " with features <em>%4</em>." )
+                                          .arg( path )
+                                          .arg( Calamares::Branding::instance()->shortProductName() )
+                                          .arg( fsType )
+                                          .arg( features ) );
+                    }
+                    else
+                    {
+                        lines.append( tr( "Install %2 on %3 system partition <strong>%1</strong>." )
+                                          .arg( path )
+                                          .arg( Calamares::Branding::instance()->shortProductName() )
+                                          .arg( fsType ) );
+                    }
                 }
                 else
                 {
-                    lines.append( tr( "Set up %3 partition <strong>%1</strong> with mount point "
-                                      "<strong>%2</strong>." )
-                                      .arg( path )
-                                      .arg( mountPoint )
-                                      .arg( fsType ) );
+                    if ( !features.isEmpty() )
+                    {
+                        lines.append( tr( "Set up %3 partition <strong>%1</strong> with mount point "
+                                          "<strong>%2</strong> and features <em>%4</em>." )
+                                          .arg( path )
+                                          .arg( mountPoint )
+                                          .arg( fsType )
+                                          .arg( features ) );
+                    }
+                    else
+                    {
+                        lines.append( tr( "Set up %3 partition <strong>%1</strong> with mount point "
+                                          "<strong>%2</strong>%4." )
+                                          .arg( path )
+                                          .arg( mountPoint )
+                                          .arg( fsType )
+                                          .arg( QString() ) );
+                    }
                 }
             }
         }
@@ -216,35 +298,29 @@ FillGlobalStorageJob::prettyStatusMessage() const
  * .. mark as "1" if it's on the system, somewhere
  * .. mark as "2" if it's one of the claimed / in-use FSses
  *
- * Stores a GS key called "filesystems_use" with this mapping.
+ * Stores a GS key called "filesystem_use" with this mapping.
+ * @see CalamaresUtils::Partition::useFilesystemGS()
  */
 static void
 storeFSUse( Calamares::GlobalStorage* storage, const QVariantList& partitions )
 {
-    QMap< QString, int > fsUses;
-    for ( const auto& p : partitions )
+    if ( storage )
     {
-        const auto pmap = p.toMap();
-
-        QString fs = pmap.value( "fs" ).toString();
-        int thisUse = pmap.value( "claimed" ).toBool() ? 2 : 1;
-
-        if ( fs.isEmpty() )
+        CalamaresUtils::Partition::clearFilesystemGS( storage );
+        for ( const auto& p : partitions )
         {
-            continue;
+            const auto pmap = p.toMap();
+
+            QString fs = pmap.value( "fs" ).toString();
+
+            if ( fs.isEmpty() )
+            {
+                continue;
+            }
+
+            CalamaresUtils::Partition::useFilesystemGS( storage, fs, true );
         }
-
-        int newUse = qMax( fsUses.value( fs ), thisUse );  // value() is 0 if not present
-        fsUses.insert( fs, newUse );
     }
-
-    QVariantMap fsUsesVariant;
-    for ( auto it = fsUses.cbegin(); it != fsUses.cend(); ++it )
-    {
-        fsUsesVariant.insert( it.key(), it.value() );
-    }
-
-    storage->insert( "filesystems_use", fsUsesVariant );
 }
 
 Calamares::JobResult

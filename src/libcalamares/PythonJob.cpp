@@ -1,22 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018-2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
-
 #include "PythonJob.h"
 
 #include "CalamaresVersion.h"
@@ -29,7 +19,14 @@
 
 #include <QDir>
 
+static const char* s_preScript = nullptr;
+
 namespace bp = boost::python;
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
+#endif
 
 BOOST_PYTHON_FUNCTION_OVERLOADS( mount_overloads, CalamaresPython::mount, 2, 4 );
 BOOST_PYTHON_FUNCTION_OVERLOADS( target_env_call_str_overloads, CalamaresPython::target_env_call, 1, 3 );
@@ -44,6 +41,16 @@ BOOST_PYTHON_FUNCTION_OVERLOADS( check_target_env_output_list_overloads,
                                  CalamaresPython::check_target_env_output,
                                  1,
                                  3 );
+BOOST_PYTHON_FUNCTION_OVERLOADS( target_env_process_output_overloads,
+                                 CalamaresPython::target_env_process_output,
+                                 1,
+                                 4 );
+BOOST_PYTHON_FUNCTION_OVERLOADS( host_env_process_output_overloads, CalamaresPython::host_env_process_output, 1, 4 );
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
 BOOST_PYTHON_MODULE( libcalamares )
 {
     bp::object package = bp::scope();
@@ -81,13 +88,25 @@ BOOST_PYTHON_MODULE( libcalamares )
     bp::scope utilsScope = utilsModule;
     Q_UNUSED( utilsScope )
 
+    // .. Logging functions
     bp::def(
         "debug", &CalamaresPython::debug, bp::args( "s" ), "Writes the given string to the Calamares debug stream." );
     bp::def( "warning",
              &CalamaresPython::warning,
              bp::args( "s" ),
              "Writes the given string to the Calamares warning stream." );
+    bp::def( "warn",
+             &CalamaresPython::warning,
+             bp::args( "s" ),
+             "Writes the given string to the Calamares warning stream." );
+    bp::def(
+        "error", &CalamaresPython::error, bp::args( "s" ), "Writes the given string to the Calamares error stream." );
 
+
+    // .. YAML functions
+    bp::def( "load_yaml", &CalamaresPython::load_yaml, bp::args( "path" ), "Loads YAML from a file." );
+
+    // .. Filesystem functions
     bp::def( "mount",
              &CalamaresPython::mount,
              mount_overloads( bp::args( "device_path", "mount_point", "filesystem_name", "options" ),
@@ -96,6 +115,8 @@ BOOST_PYTHON_MODULE( libcalamares )
                               "-1 = QProcess crash\n"
                               "-2 = QProcess cannot start\n"
                               "-3 = bad arguments" ) );
+
+    // .. Process functions
     bp::def(
         "target_env_call",
         static_cast< int ( * )( const std::string&, const std::string&, int ) >( &CalamaresPython::target_env_call ),
@@ -145,6 +166,16 @@ BOOST_PYTHON_MODULE( libcalamares )
                                                      "Runs the specified command in the chroot of the target system.\n"
                                                      "Returns the program's standard output, and raises a "
                                                      "subprocess.CalledProcessError if something went wrong." ) );
+    bp::def( "target_env_process_output",
+             &CalamaresPython::target_env_process_output,
+             target_env_process_output_overloads( bp::args( "command", "callback", "stdin", "timeout" ),
+                                                  "Runs the specified @p command in the target system." ) );
+    bp::def( "host_env_process_output",
+             &CalamaresPython::host_env_process_output,
+             host_env_process_output_overloads( bp::args( "command", "callback", "stdin", "timeout" ),
+                                                "Runs the specified command in the host system." ) );
+
+    // .. String functions
     bp::def( "obscure",
              &CalamaresPython::obscure,
              bp::args( "s" ),
@@ -153,7 +184,7 @@ BOOST_PYTHON_MODULE( libcalamares )
              "Applying the function to a string obscured by this function will result "
              "in the original string." );
 
-
+    // .. Translation functions
     bp::def( "gettext_languages",
              &CalamaresPython::gettext_languages,
              "Returns list of languages (most to least-specific) for gettext." );
@@ -170,8 +201,7 @@ struct PythonJob::Private
     bp::object m_prettyStatusMessage;
 };
 
-PythonJob::PythonJob( const ModuleSystem::InstanceKey& instance,
-                      const QString& scriptFile,
+PythonJob::PythonJob( const QString& scriptFile,
                       const QString& workingPath,
                       const QVariantMap& moduleConfiguration,
                       QObject* parent )
@@ -181,18 +211,11 @@ PythonJob::PythonJob( const ModuleSystem::InstanceKey& instance,
     , m_workingPath( workingPath )
     , m_description()
     , m_configurationMap( moduleConfiguration )
-    , m_weight( ( instance.module() == QStringLiteral( "unpackfs" ) ) ? 12.0 : 1.0 )
 {
 }
 
 
 PythonJob::~PythonJob() {}
-
-qreal
-PythonJob::getJobWeight() const
-{
-    return m_weight;
-}
 
 QString
 PythonJob::prettyName() const
@@ -260,6 +283,11 @@ PythonJob::exec()
         calamaresNamespace[ "globalstorage" ]
             = CalamaresPython::GlobalStoragePythonWrapper( JobQueue::instance()->globalStorage() );
 
+        if ( s_preScript )
+        {
+            bp::exec( s_preScript, scriptNamespace, scriptNamespace );
+        }
+
         cDebug() << "Job file" << scriptFI.absoluteFilePath();
         bp::object execResult
             = bp::exec_file( scriptFI.absoluteFilePath().toLocal8Bit().data(), scriptNamespace, scriptNamespace );
@@ -279,12 +307,12 @@ PythonJob::exec()
                 {
                     m_description.truncate( i_newline );
                 }
-                cDebug() << "Job description from __doc__" << prettyName() << '=' << m_description;
+                cDebug() << Logger::SubEntry << "Job description from __doc__" << prettyName() << '=' << m_description;
             }
         }
         else
         {
-            cDebug() << "Job description from pretty_name" << prettyName() << '=' << m_description;
+            cDebug() << Logger::SubEntry << "Job description from pretty_name" << prettyName() << '=' << m_description;
         }
         emit progress( 0 );
 
@@ -302,7 +330,7 @@ PythonJob::exec()
             return JobResult::error( message, description );
         }
     }
-    catch ( bp::error_already_set )
+    catch ( bp::error_already_set& )
     {
         QString msg;
         if ( PyErr_Occurred() )
@@ -335,6 +363,14 @@ PythonJob::emitProgress( qreal progressValue )
         }
     }
     emit progress( progressValue );
+}
+
+void
+PythonJob::setInjectedPreScript( const char* preScript )
+{
+    s_preScript = preScript;
+    cDebug() << "Python pre-script set to string" << Logger::Pointer( preScript ) << "length"
+             << ( preScript ? strlen( preScript ) : 0 );
 }
 
 }  // namespace Calamares

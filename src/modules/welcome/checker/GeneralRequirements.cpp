@@ -1,22 +1,13 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2017, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
- *   Copyright 2017, Gabriel Craciunescu <crazy@frugalware.org>
- *   Copyright 2019, Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-FileCopyrightText: 2014-2017 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2018 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Gabriel Craciunescu <crazy@frugalware.org>
+ *   SPDX-FileCopyrightText: 2019 Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "GeneralRequirements.h"
@@ -38,12 +29,12 @@
 #include "GlobalStorage.h"
 #include "JobQueue.h"
 
-#include <QGuiApplication>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QScreen>
 
 #include <unistd.h>  //geteuid
@@ -70,28 +61,58 @@ biggestSingleScreen()
     return s;
 }
 
+/** @brief Distinguish has-not-been-checked-at-all from false.
+ *
+ */
+struct MaybeChecked
+{
+    bool hasBeenChecked = false;
+    bool value = false;
+
+    MaybeChecked& operator=( bool b )
+    {
+        hasBeenChecked = true;
+        value = b;
+        return *this;
+    }
+
+    operator bool() const { return value; }
+};
+
+QDebug&
+operator<<( QDebug& s, const MaybeChecked& c )
+{
+    if ( c.hasBeenChecked )
+    {
+        s << c.value;
+    }
+    else
+    {
+        s << "unchecked";
+    }
+    return s;
+}
+
 Calamares::RequirementsList
 GeneralRequirements::checkRequirements()
 {
     QSize availableSize = biggestSingleScreen();
 
-    bool enoughStorage = false;
-    bool enoughRam = false;
-    bool hasPower = false;
-    bool hasInternet = false;
-    bool isRoot = false;
+    MaybeChecked enoughStorage;
+    MaybeChecked enoughRam;
+    MaybeChecked hasPower;
+    MaybeChecked hasInternet;
+    MaybeChecked isRoot;
     bool enoughScreen = availableSize.isValid() && ( availableSize.width() >= CalamaresUtils::windowMinimumWidth )
         && ( availableSize.height() >= CalamaresUtils::windowMinimumHeight );
 
     qint64 requiredStorageB = CalamaresUtils::GiBtoBytes( m_requiredStorageGiB );
-    cDebug() << "Need at least storage bytes:" << requiredStorageB;
     if ( m_entriesToCheck.contains( "storage" ) )
     {
         enoughStorage = checkEnoughStorage( requiredStorageB );
     }
 
     qint64 requiredRamB = CalamaresUtils::GiBtoBytes( m_requiredRamGiB );
-    cDebug() << "Need at least ram bytes:" << requiredRamB;
     if ( m_entriesToCheck.contains( "ram" ) )
     {
         enoughRam = checkEnoughRam( requiredRamB );
@@ -112,10 +133,18 @@ GeneralRequirements::checkRequirements()
         isRoot = checkIsRoot();
     }
 
-    using TR = Logger::DebugRow< const char*, bool >;
-    cDebug() << "GeneralRequirements output:" << TR( "enoughStorage", enoughStorage ) << TR( "enoughRam", enoughRam )
-             << TR( "hasPower", hasPower ) << TR( "hasInternet", hasInternet ) << TR( "isRoot", isRoot );
-
+    using TNum = Logger::DebugRow< const char*, qint64 >;
+    using TR = Logger::DebugRow< const char*, MaybeChecked >;
+    // clang-format off
+    cDebug() << "GeneralRequirements output:"
+             << TNum( "storage", requiredStorageB )
+             << TR( "enoughStorage", enoughStorage )
+             << TNum( "RAM", requiredRamB )
+             << TR( "enoughRam", enoughRam )
+             << TR( "hasPower", hasPower )
+             << TR( "hasInternet", hasInternet )
+             << TR( "isRoot", isRoot );
+    // clang-format on
     Calamares::RequirementsList checkEntries;
     foreach ( const QString& entry, m_entriesToCheck )
     {
@@ -123,10 +152,10 @@ GeneralRequirements::checkRequirements()
         {
             checkEntries.append(
                 { entry,
-                  [req = m_requiredStorageGiB] { return tr( "has at least %1 GiB available drive space" ).arg( req ); },
-                  [req = m_requiredStorageGiB] {
-                      return tr( "There is not enough drive space. At least %1 GiB is required." ).arg( req );
-                  },
+                  [ req = m_requiredStorageGiB ]
+                  { return tr( "has at least %1 GiB available drive space" ).arg( req ); },
+                  [ req = m_requiredStorageGiB ]
+                  { return tr( "There is not enough drive space. At least %1 GiB is required." ).arg( req ); },
                   enoughStorage,
                   m_entriesToRequire.contains( entry ) } );
         }
@@ -134,8 +163,8 @@ GeneralRequirements::checkRequirements()
         {
             checkEntries.append(
                 { entry,
-                  [req = m_requiredRamGiB] { return tr( "has at least %1 GiB working memory" ).arg( req ); },
-                  [req = m_requiredRamGiB] {
+                  [ req = m_requiredRamGiB ] { return tr( "has at least %1 GiB working memory" ).arg( req ); },
+                  [ req = m_requiredRamGiB ] {
                       return tr( "The system does not have enough working memory. At least %1 GiB is required." )
                           .arg( req );
                   },
@@ -162,7 +191,8 @@ GeneralRequirements::checkRequirements()
         {
             checkEntries.append( { entry,
                                    [] { return tr( "is running the installer as an administrator (root)" ); },
-                                   [] {
+                                   []
+                                   {
                                        return Calamares::Settings::instance()->isSetupMode()
                                            ? tr( "The setup program is not running with administrator rights." )
                                            : tr( "The installer is not running with administrator rights." );
@@ -174,7 +204,8 @@ GeneralRequirements::checkRequirements()
         {
             checkEntries.append( { entry,
                                    [] { return tr( "has a screen large enough to show the whole installer" ); },
-                                   [] {
+                                   []
+                                   {
                                        return Calamares::Settings::instance()->isSetupMode()
                                            ? tr( "The screen is too small to display the setup program." )
                                            : tr( "The screen is too small to display the installer." );
@@ -184,6 +215,58 @@ GeneralRequirements::checkRequirements()
         }
     }
     return checkEntries;
+}
+
+/** @brief Loads the check-internet URLs
+ *
+ * There may be zero or one or more URLs specified; returns
+ * @c true if the configuration is incomplete or damaged in some way.
+ */
+static bool
+getCheckInternetUrls( const QVariantMap& configurationMap )
+{
+    const QString exampleUrl = QStringLiteral( "http://example.com" );
+
+    bool incomplete = false;
+    QStringList checkInternetSetting = CalamaresUtils::getStringList( configurationMap, "internetCheckUrl" );
+    if ( !checkInternetSetting.isEmpty() )
+    {
+        QVector< QUrl > urls;
+        for ( const auto& urlString : qAsConst( checkInternetSetting ) )
+        {
+            QUrl url( urlString.trimmed() );
+            if ( url.isValid() )
+            {
+                urls.append( url );
+            }
+            else
+            {
+                cWarning() << "GeneralRequirements entry 'internetCheckUrl' in welcome.conf contains invalid"
+                           << urlString;
+            }
+        }
+
+        if ( urls.empty() )
+        {
+            cWarning() << "GeneralRequirements entry 'internetCheckUrl' contains no valid URLs, "
+                       << "reverting to default (" << exampleUrl << ").";
+            CalamaresUtils::Network::Manager::instance().setCheckHasInternetUrl( QUrl( exampleUrl ) );
+            incomplete = true;
+        }
+        else
+        {
+            CalamaresUtils::Network::Manager::instance().setCheckHasInternetUrl( urls );
+        }
+    }
+    else
+    {
+        cWarning() << "GeneralRequirements entry 'internetCheckUrl' is undefined in welcome.conf, "
+                      "reverting to default ("
+                   << exampleUrl << ").";
+        CalamaresUtils::Network::Manager::instance().setCheckHasInternetUrl( QUrl( exampleUrl ) );
+        incomplete = true;
+    }
+    return incomplete;
 }
 
 
@@ -273,30 +356,7 @@ GeneralRequirements::setConfigurationMap( const QVariantMap& configurationMap )
         incompleteConfiguration = true;
     }
 
-    QUrl checkInternetUrl;
-    QString checkInternetSetting = CalamaresUtils::getString( configurationMap, "internetCheckUrl" );
-    if ( !checkInternetSetting.isEmpty() )
-    {
-        checkInternetUrl = QUrl( checkInternetSetting.trimmed() );
-        if ( !checkInternetUrl.isValid() )
-        {
-            cWarning() << "GeneralRequirements entry 'internetCheckUrl' is invalid in welcome.conf"
-                       << checkInternetSetting << "reverting to default (http://example.com).";
-            checkInternetUrl = QUrl( "http://example.com" );
-            incompleteConfiguration = true;
-        }
-    }
-    else
-    {
-        cWarning() << "GeneralRequirements entry 'internetCheckUrl' is undefined in welcome.conf,"
-                      "reverting to default (http://example.com).";
-        checkInternetUrl = "http://example.com";
-        incompleteConfiguration = true;
-    }
-    if ( checkInternetUrl.isValid() )
-    {
-        CalamaresUtils::Network::Manager::instance().setCheckHasInternetUrl( checkInternetUrl );
-    }
+    incompleteConfiguration |= getCheckInternetUrls( configurationMap );
 
     if ( incompleteConfiguration )
     {
@@ -324,7 +384,7 @@ GeneralRequirements::checkEnoughRam( qint64 requiredRam )
     // Ignore the guesstimate-factor; we get an under-estimate
     // which is probably the usable RAM for programs.
     quint64 availableRam = CalamaresUtils::System::instance()->getTotalMemoryB().first;
-    return availableRam >= requiredRam * 0.95;  // because MemTotal is variable
+    return double( availableRam ) >= double( requiredRam ) * 0.95;  // cast to silence 64-bit-int conversion to double
 }
 
 

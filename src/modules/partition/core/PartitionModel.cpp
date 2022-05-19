@@ -1,27 +1,19 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2018-2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2018-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "core/PartitionModel.h"
+#include "PartitionModel.h"
 
 #include "core/ColorUtils.h"
 #include "core/KPMHelpers.h"
 #include "core/PartitionInfo.h"
+#include "core/SizeUtils.h"
 
 #include "partition/FileSystem.h"
 #include "partition/PartitionQuery.h"
@@ -32,9 +24,6 @@
 #include <kpmcore/core/partition.h>
 #include <kpmcore/core/partitiontable.h>
 #include <kpmcore/fs/filesystem.h>
-
-// KF5
-#include <KFormat>
 
 // Qt
 #include <QColor>
@@ -176,6 +165,10 @@ PartitionModel::data( const QModelIndex& index, int role ) const
         {
             return CalamaresUtils::Partition::prettyNameForFileSystemType( partition->fileSystem().type() );
         }
+        if ( col == FileSystemLabelColumn )
+        {
+            return partition->fileSystem().label();
+        }
         if ( col == MountPointColumn )
         {
             return PartitionInfo::mountPoint( partition );
@@ -183,7 +176,7 @@ PartitionModel::data( const QModelIndex& index, int role ) const
         if ( col == SizeColumn )
         {
             qint64 size = ( partition->lastSector() - partition->firstSector() + 1 ) * m_device->logicalSize();
-            return KFormat().formatByteSize( size );
+            return formatByteSize( size );
         }
         cDebug() << "Unknown column" << col;
         return QVariant();
@@ -215,7 +208,7 @@ PartitionModel::data( const QModelIndex& index, int role ) const
         QString prettyFileSystem
             = CalamaresUtils::Partition::prettyNameForFileSystemType( partition->fileSystem().type() );
         qint64 size = ( partition->lastSector() - partition->firstSector() + 1 ) * m_device->logicalSize();
-        QString prettySize = KFormat().formatByteSize( size );
+        QString prettySize = formatByteSize( size );
         return QVariant( name + " " + prettyFileSystem + " " + prettySize );
     }
     case SizeRole:
@@ -241,7 +234,7 @@ PartitionModel::data( const QModelIndex& index, int role ) const
         return partition->partitionPath();
 
     case PartitionPtrRole:
-        return qVariantFromValue( (void*)partition );
+        return QVariant::fromValue( (void*)partition );
 
     // Osprober roles:
     case OsproberNameRole:
@@ -305,6 +298,8 @@ PartitionModel::headerData( int section, Qt::Orientation, int role ) const
         return tr( "Name" );
     case FileSystemColumn:
         return tr( "File System" );
+    case FileSystemLabelColumn:
+        return tr( "File System Label" );
     case MountPointColumn:
         return tr( "Mount Point" );
     case SizeColumn:
@@ -330,5 +325,5 @@ PartitionModel::partitionForIndex( const QModelIndex& index ) const
 void
 PartitionModel::update()
 {
-    emit dataChanged( index( 0, 0 ), index( rowCount() - 1, columnCount() - 1 ) );
+    Q_EMIT dataChanged( index( 0, 0 ), index( rowCount() - 1, columnCount() - 1 ) );
 }

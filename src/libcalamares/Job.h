@@ -1,21 +1,13 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
-
 #ifndef CALAMARES_JOB_H
 #define CALAMARES_JOB_H
 
@@ -43,7 +35,8 @@ public:
         NoError = 0,
         GenericError = -1,
         PythonUncaughtException = 1,
-        InvalidConfiguration = 2
+        InvalidConfiguration = 2,
+        MissingRequirements = 3,
     };
 
     // Can't copy, but you can keep a temporary
@@ -54,7 +47,7 @@ public:
 
     /** @brief Is this JobResult a success?
      *
-     * Equivalent to errorCode() == 0, might be named  isValid().
+     * Equivalent to errorCode() == 0, see succeeded().
      */
     virtual operator bool() const;
 
@@ -65,6 +58,11 @@ public:
     virtual void setDetails( const QString& details );
 
     int errorCode() const { return m_number; }
+    /** @brief Is this JobResult a success?
+     *
+     * Equivalent to errorCode() == 0.
+     */
+    bool succeeded() const { return this->operator bool(); }
 
     /// @brief an "ok status" result
     static JobResult ok();
@@ -94,24 +92,37 @@ class DLLEXPORT Job : public QObject
     Q_OBJECT
 public:
     explicit Job( QObject* parent = nullptr );
-    virtual ~Job();
+    ~Job() override;
 
     /** @brief The job's (relative) weight.
      *
-     * The default implementation returns 1.0, which gives all jobs
+     * The default implementation returns 1, which gives all jobs
      * the same weight, so they advance the overall progress the same
      * amount. This is nonsense, since some jobs take much longer than
      * others; it's up to the individual jobs to say something about
      * how much work is (relatively) done.
+     *
+     * Since jobs are caused by **modules** from the sequence, the
+     * overall weight of the module is taken into account: its weight
+     * is divided among the jobs based on each jobs relative weight.
+     * This can be used in a module that runs a bunch of jobs to indicate
+     * which of the jobs is "heavy" and which is not.
      */
-    virtual qreal getJobWeight() const;
+    virtual int getJobWeight() const;
     /** @brief The human-readable name of this job
      *
      * This should be a very short statement of what the job does.
      * For status and state information, see prettyStatusMessage().
      */
     virtual QString prettyName() const = 0;
-    // TODO: Unused
+    /** @brief a longer human-readable description of what the job will do
+     *
+     * This **may** be used by view steps to fill in the summary
+     * messages for the summary page; at present, only the *partition*
+     * module does so.
+     *
+     * The default implementation returns an empty string.
+     */
     virtual QString prettyDescription() const;
     /** @brief A human-readable status for progress reporting
      *
@@ -126,6 +137,11 @@ public:
     void setEmergency( bool e ) { m_emergency = e; }
 
 signals:
+    /** @brief Signals that the job has made progress
+     *
+     * The parameter @p percent should be between 0 (0%) and 1 (100%).
+     * Values outside of this range will be clamped.
+     */
     void progress( qreal percent );
 
 private:

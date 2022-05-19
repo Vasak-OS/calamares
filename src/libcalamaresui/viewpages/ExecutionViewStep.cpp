@@ -1,47 +1,63 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "ExecutionViewStep.h"
 
+#include "Slideshow.h"
+
 #include "Branding.h"
+#include "CalamaresConfig.h"
 #include "Job.h"
 #include "JobQueue.h"
 #include "Settings.h"
 #include "ViewManager.h"
-
 #include "modulesystem/Module.h"
 #include "modulesystem/ModuleManager.h"
 #include "utils/CalamaresUtilsGui.h"
 #include "utils/Dirs.h"
 #include "utils/Logger.h"
-#include "utils/Qml.h"
 #include "utils/Retranslator.h"
+#include "widgets/LogWidget.h"
 
+#include <QAction>
 #include <QDir>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QPlainTextEdit>
 #include <QProgressBar>
-#include <QQmlComponent>
-#include <QQmlEngine>
-#include <QQuickItem>
-#include <QQuickWidget>
+#include <QTabBar>
+#include <QTabWidget>
+#include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
+
+static Calamares::Slideshow*
+makeSlideshow( QWidget* parent )
+{
+    const int api = Calamares::Branding::instance()->slideshowAPI();
+    switch ( api )
+    {
+    case -1:
+        return new Calamares::SlideshowPictures( parent );
+#ifdef WITH_QML
+    case 1:
+        [[fallthrough]];
+    case 2:
+        return new Calamares::SlideshowQML( parent );
+#endif
+    default:
+        cWarning() << "Unknown Branding slideshow API" << api;
+        return new Calamares::SlideshowPictures( parent );
+    }
+}
 
 namespace Calamares
 {
@@ -51,38 +67,48 @@ ExecutionViewStep::ExecutionViewStep( QObject* parent )
     , m_widget( new QWidget )
     , m_progressBar( new QProgressBar )
     , m_label( new QLabel )
-    , m_qmlShow( new QQuickWidget )
-    , m_qmlComponent( nullptr )
-    , m_qmlObject( nullptr )
+    , m_slideshow( makeSlideshow( m_widget ) )
+    , m_tab_widget( new QTabWidget )
+    , m_log_widget( new LogWidget )
 {
+    m_widget->setObjectName( "slideshow" );
+    m_progressBar->setObjectName( "exec-progress" );
+    m_label->setObjectName( "exec-message" );
+
     QVBoxLayout* layout = new QVBoxLayout( m_widget );
-    QVBoxLayout* innerLayout = new QVBoxLayout;
+    QVBoxLayout* bottomLayout = new QVBoxLayout;
+    QHBoxLayout* barLayout = new QHBoxLayout;
 
     m_progressBar->setMaximum( 10000 );
 
-    m_qmlShow->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Expanding );
-    m_qmlShow->setResizeMode( QQuickWidget::SizeRootObjectToView );
-    m_qmlShow->engine()->addImportPath( CalamaresUtils::qmlModulesDir().absolutePath() );
+    m_tab_widget->addTab( m_slideshow->widget(), "Slideshow" );
+    m_tab_widget->addTab( m_log_widget, "Log" );
+    m_tab_widget->tabBar()->hide();
 
-    layout->addWidget( m_qmlShow );
+    layout->addWidget( m_tab_widget );
     CalamaresUtils::unmarginLayout( layout );
-    layout->addLayout( innerLayout );
+    layout->addLayout( bottomLayout );
 
-    innerLayout->addSpacing( CalamaresUtils::defaultFontHeight() / 2 );
-    innerLayout->addWidget( m_progressBar );
-    innerLayout->addWidget( m_label );
+    bottomLayout->addSpacing( CalamaresUtils::defaultFontHeight() / 2 );
+    bottomLayout->addLayout( barLayout );
+    bottomLayout->addWidget( m_label );
 
-    cDebug() << "QML import paths:" << Logger::DebugList( m_qmlShow->engine()->importPathList() );
-    if ( Branding::instance()->slideshowAPI() == 2 )
-    {
-        cDebug() << "QML load on startup, API 2.";
-        loadQmlV2();
-    }
+    QToolBar* toolBar = new QToolBar;
+    const auto logButtonIcon = QIcon::fromTheme( "utilities-terminal" );
+    auto toggleLogAction = toolBar->addAction(
+        Branding::instance()->image(
+            { "utilities-log-viewer", "utilities-terminal", "text-x-log", "text-x-changelog", "preferences-log" },
+            QSize( 32, 32 ) ),
+        "Toggle log" );
+    auto toggleLogButton = dynamic_cast< QToolButton* >( toolBar->widgetForAction( toggleLogAction ) );
+    connect( toggleLogButton, &QToolButton::clicked, this, &ExecutionViewStep::toggleLog );
+
+
+    barLayout->addWidget( m_progressBar );
+    barLayout->addWidget( toolBar );
+
 
     connect( JobQueue::instance(), &JobQueue::progress, this, &ExecutionViewStep::updateFromJobQueue );
-#if QT_VERSION >= QT_VERSION_CHECK( 5, 10, 0 )
-    CALAMARES_RETRANSLATE( m_qmlShow->engine()->retranslate(); )
-#endif
 }
 
 
@@ -140,112 +166,28 @@ ExecutionViewStep::isAtEnd() const
 }
 
 void
-ExecutionViewStep::loadQmlV2()
-{
-    if ( !m_qmlComponent && !Calamares::Branding::instance()->slideshowPath().isEmpty() )
-    {
-        m_qmlComponent = new QQmlComponent( m_qmlShow->engine(),
-                                            QUrl::fromLocalFile( Calamares::Branding::instance()->slideshowPath() ),
-                                            QQmlComponent::CompilationMode::Asynchronous );
-        connect( m_qmlComponent, &QQmlComponent::statusChanged, this, &ExecutionViewStep::loadQmlV2Complete );
-    }
-}
-
-/// @brief State-change of the slideshow, for changeSlideShowState()
-enum class Slideshow
-{
-    Start,
-    Stop
-};
-
-/** @brief Tells the slideshow we activated or left the show.
- *
- * If @p state is @c Slideshow::Start, calls suitable activation procedures.
- * If @p state is @c Slideshow::Stop, calls deactivation procedures.
- *
- * Applies V1 and V2 QML activation / deactivation:
- *  - V1 loads the QML in @p widget on activation. Sets root object property
- *    *activatedInCalamares* as appropriate.
- *  - V2 calls onActivate() or onLeave() in the QML as appropriate. Also
- *    sets the *activatedInCalamares* property.
- */
-static void
-changeSlideShowState( Slideshow state, QQuickItem* slideshow, QQuickWidget* widget )
-{
-    bool activate = state == Slideshow::Start;
-
-    if ( Branding::instance()->slideshowAPI() == 2 )
-    {
-        // The QML was already loaded in the constructor, need to start it
-        CalamaresUtils::callQMLFunction( slideshow, activate ? "onActivate" : "onLeave" );
-    }
-    else if ( !Calamares::Branding::instance()->slideshowPath().isEmpty() )
-    {
-        // API version 1 assumes onCompleted is the trigger
-        if ( activate )
-        {
-            widget->setSource( QUrl::fromLocalFile( Calamares::Branding::instance()->slideshowPath() ) );
-        }
-        // needs the root object for property setting, below
-        slideshow = widget->rootObject();
-    }
-
-    // V1 API has picked up the root object for use, V2 passed it in.
-    if ( slideshow )
-    {
-        static const char propertyName[] = "activatedInCalamares";
-        auto property = slideshow->property( propertyName );
-        if ( property.isValid() && ( property.type() == QVariant::Bool ) && ( property.toBool() != activate ) )
-        {
-            slideshow->setProperty( propertyName, activate );
-        }
-    }
-}
-
-void
-ExecutionViewStep::loadQmlV2Complete()
-{
-    if ( m_qmlComponent && m_qmlComponent->isReady() && !m_qmlObject )
-    {
-        cDebug() << "QML component complete, API 2";
-        // Don't do this again
-        disconnect( m_qmlComponent, &QQmlComponent::statusChanged, this, &ExecutionViewStep::loadQmlV2Complete );
-
-        QObject* o = m_qmlComponent->create();
-        m_qmlObject = qobject_cast< QQuickItem* >( o );
-        if ( !m_qmlObject )
-        {
-            delete o;
-        }
-        else
-        {
-            cDebug() << Logger::SubEntry << "Loading" << Calamares::Branding::instance()->slideshowPath();
-
-            // setContent() is public API, but not documented publicly.
-            // It is marked \internal in the Qt sources, but does exactly
-            // what is needed: sets up visual parent by replacing the root
-            // item, and handling resizes.
-            m_qmlShow->setContent(
-                QUrl::fromLocalFile( Calamares::Branding::instance()->slideshowPath() ), m_qmlComponent, m_qmlObject );
-            if ( ViewManager::instance()->currentStep() == this )
-            {
-                // We're alreay visible! Must have been slow QML loading, and we
-                // passed onActivate already.
-                changeSlideShowState( Slideshow::Start, m_qmlObject, m_qmlShow );
-            }
-        }
-    }
-}
-
-void
 ExecutionViewStep::onActivate()
 {
-    changeSlideShowState( Slideshow::Start, m_qmlObject, m_qmlShow );
+    m_slideshow->changeSlideShowState( Slideshow::Start );
+
+    const auto instanceDescriptors = Calamares::Settings::instance()->moduleInstances();
 
     JobQueue* queue = JobQueue::instance();
-    foreach ( const QString& instanceKey, m_jobInstanceKeys )
+    for ( const auto& instanceKey : m_jobInstanceKeys )
     {
+        const auto& moduleDescriptor = Calamares::ModuleManager::instance()->moduleDescriptor( instanceKey );
         Calamares::Module* module = Calamares::ModuleManager::instance()->moduleInstance( instanceKey );
+
+        const auto instanceDescriptor
+            = std::find_if( instanceDescriptors.constBegin(),
+                            instanceDescriptors.constEnd(),
+                            [ = ]( const Calamares::InstanceDescription& d ) { return d.key() == instanceKey; } );
+        int weight = moduleDescriptor.weight();
+        if ( instanceDescriptor != instanceDescriptors.constEnd() && instanceDescriptor->explicitWeight() )
+        {
+            weight = instanceDescriptor->weight();
+        }
+        weight = qBound( 1, weight, 100 );
         if ( module )
         {
             auto jl = module->jobs();
@@ -256,7 +198,7 @@ ExecutionViewStep::onActivate()
                     j->setEmergency( true );
                 }
             }
-            queue->enqueue( jl );
+            queue->enqueue( weight, jl );
         }
     }
 
@@ -272,7 +214,7 @@ ExecutionViewStep::jobs() const
 
 
 void
-ExecutionViewStep::appendJobModuleInstanceKey( const QString& instanceKey )
+ExecutionViewStep::appendJobModuleInstanceKey( const ModuleSystem::InstanceKey& instanceKey )
 {
     m_jobInstanceKeys.append( instanceKey );
 }
@@ -282,19 +224,33 @@ void
 ExecutionViewStep::updateFromJobQueue( qreal percent, const QString& message )
 {
     m_progressBar->setValue( int( percent * m_progressBar->maximum() ) );
-    m_label->setText( message );
+    if ( !message.isEmpty() )
+    {
+        m_label->setText( message );
+    }
+}
+
+void
+ExecutionViewStep::toggleLog()
+{
+    const bool logBecomesVisible = m_tab_widget->currentIndex() == 0;  // ie. is not visible right now
+    if ( logBecomesVisible )
+    {
+        m_log_widget->start();
+    }
+    else
+    {
+        m_log_widget->stop();
+    }
+    m_tab_widget->setCurrentIndex( logBecomesVisible ? 1 : 0 );
 }
 
 void
 ExecutionViewStep::onLeave()
 {
-    changeSlideShowState( Slideshow::Stop, m_qmlObject, m_qmlShow );
-    // API version 2 is explicitly stopped; version 1 keeps running
-    if ( Branding::instance()->slideshowAPI() == 2 )
-    {
-        delete m_qmlObject;
-        m_qmlObject = nullptr;
-    }
+    m_log_widget->stop();
+    m_slideshow->changeSlideShowState( Slideshow::Stop );
 }
+
 
 }  // namespace Calamares

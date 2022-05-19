@@ -1,20 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef UTILS_CALAMARESUTILSSYSTEM_H
 #define UTILS_CALAMARESUTILSSYSTEM_H
@@ -134,7 +126,7 @@ public:
      * @param parent the QObject parent.
      */
     explicit System( bool doChroot, QObject* parent = nullptr );
-    virtual ~System();
+    ~System() override;
 
     static System* instance();
 
@@ -147,32 +139,33 @@ public:
         RunInTarget
     };
 
-    /**
-      * Runs the specified command in the chroot of the target system.
-      * @param args the command with arguments, as a string list.
-      * @param workingPath the current working directory for the QProcess
-      *        call (optional).
-      * @param stdInput the input string to send to the running process as
-      *        standard input (optional).
-      * @param timeoutSec the timeout after which the process will be
-      *        killed (optional, default is 0 i.e. no timeout).
-      *
-      * @returns the program's exit code and its output (if any). Special
-      *     exit codes (which will never have any output) are:
-      *             Crashed = QProcess crash
-      *             FailedToStart = QProcess cannot start
-      *             NoWorkingDirectory = bad arguments
-      *             TimedOut = QProcess timeout
-      */
+    /** @brief Runs a command in the host or the target (select explicitly)
+     *
+     * @param location whether to run in the host or the target
+     * @param args the command with arguments, as a string list.
+     * @param workingPath the current working directory for the QProcess
+     *        call (optional).
+     * @param stdInput the input string to send to the running process as
+     *        standard input (optional).
+     * @param timeoutSec the timeout after which the process will be
+     *        killed (optional, default is 0 i.e. no timeout).
+     *
+     * @returns the program's exit code and its output (if any). Special
+     *     exit codes (which will never have any output) are:
+     *             Crashed = QProcess crash
+     *             FailedToStart = QProcess cannot start
+     *             NoWorkingDirectory = bad arguments
+     *             TimedOut = QProcess timeout
+     */
     static DLLEXPORT ProcessResult runCommand( RunLocation location,
                                                const QStringList& args,
                                                const QString& workingPath = QString(),
                                                const QString& stdInput = QString(),
                                                std::chrono::seconds timeoutSec = std::chrono::seconds( 0 ) );
 
-    /** @brief Convenience wrapper for runCommand()
+    /** @brief Convenience wrapper for runCommand() in the host
      *
-     * Runs the given command-line @p args in the host in the current direcory
+     * Runs the given command-line @p args in the **host** in the current direcory
      * with no input, and the given @p timeoutSec for completion.
      */
     static inline ProcessResult runCommand( const QStringList& args, std::chrono::seconds timeoutSec )
@@ -181,10 +174,11 @@ public:
     }
 
     /** @brief Convenience wrapper for runCommand().
-     *  Runs the command in the location specified through the boolean
-     *  doChroot(), which is what you usually want for running commands
-     *  during installation.
-      */
+     *
+     * Runs the command in the location specified through the boolean
+     * doChroot(), which is what you usually want for running commands
+     * during installation.
+     */
     inline ProcessResult targetEnvCommand( const QStringList& args,
                                            const QString& workingPath = QString(),
                                            const QString& stdInput = QString(),
@@ -293,6 +287,24 @@ public:
      */
     DLLEXPORT void removeTargetFile( const QString& path ) const;
 
+    /** @brief Reads a file from the target system.
+     *
+     * @param path Path to the file; this is interpreted from the root of
+     *      the target system (@see targetPath()).
+     *
+     * Does no error checking, and returns an empty list if the file does
+     * not exist.
+     *
+     * NOTE: This function is now basically the same as QFile::readAll(),
+     *       splitting into lines, but Calamares may need to change
+     *       permissions or raise privileges to actually read the file,
+     *       which is why there is an API.
+     *
+     * NOTE: Since this buffers the whole file in memory, reading big files
+     *       is not recommended.
+     */
+    DLLEXPORT QStringList readTargetFile( const QString& path ) const;
+
     /** @brief Ensure that the directory @p path exists
      *
      * @param path a full pathname to a desired directory.
@@ -325,7 +337,7 @@ public:
      *
      * @return size, guesstimate-factor
      */
-    DLLEXPORT QPair< quint64, float > getTotalMemoryB() const;
+    DLLEXPORT QPair< qint64, qreal > getTotalMemoryB() const;
 
     /**
      * @brief getCpuDescription returns a string describing the CPU.

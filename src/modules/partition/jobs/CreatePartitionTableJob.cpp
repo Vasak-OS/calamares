@@ -1,29 +1,22 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Aurélien Gâteau <agateau@kde.org>
- *   Copyright 2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Aurélien Gâteau <agateau@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "CreatePartitionTableJob.h"
 
 #include "partition/PartitionIterator.h"
+#include "utils/CalamaresUtilsSystem.h"
 #include "utils/Logger.h"
 
-// KPMcore
+#include "core/KPMHelpers.h"
+
 #include <kpmcore/core/device.h>
 #include <kpmcore/core/partition.h>
 #include <kpmcore/core/partitiontable.h>
@@ -69,54 +62,30 @@ CreatePartitionTableJob::prettyStatusMessage() const
 }
 
 
-static inline QDebug&
-operator<<( QDebug&& s, PartitionIterator& it )
-{
-    s << ( ( *it ) ? ( *it )->deviceNode() : QString( "<null device>" ) );
-    return s;
-}
-
-
 Calamares::JobResult
 CreatePartitionTableJob::exec()
 {
-    Report report( nullptr );
-    QString message = tr( "The installer failed to create a partition table on %1." ).arg( m_device->name() );
 
     PartitionTable* table = m_device->partitionTable();
-    cDebug() << "Creating new partition table of type" << table->typeName() << ", uncommitted yet:";
 
     if ( Logger::logLevelEnabled( Logger::LOGDEBUG ) )
     {
+        cDebug() << "Creating new partition table of type" << table->typeName() << ", uncommitted partitions:";
         for ( auto it = PartitionIterator::begin( table ); it != PartitionIterator::end( table ); ++it )
         {
-            cDebug() << it;
+            cDebug() << Logger::SubEntry << ( ( *it ) ? ( *it )->deviceNode() : QString( "<null device>" ) );
         }
 
-        QProcess lsblk;
-        lsblk.setProgram( "lsblk" );
-        lsblk.setProcessChannelMode( QProcess::MergedChannels );
-        lsblk.start();
-        lsblk.waitForFinished();
-        cDebug() << "lsblk:\n" << lsblk.readAllStandardOutput();
+        auto lsblkResult = CalamaresUtils::System::runCommand( { "lsblk" }, std::chrono::seconds( 30 ) );
+        cDebug() << Logger::SubEntry << "lsblk output:\n" << Logger::NoQuote << lsblkResult.getOutput();
 
-        QProcess mount;
-        mount.setProgram( "mount" );  // Debug output only, not mounting something
-        mount.setProcessChannelMode( QProcess::MergedChannels );
-        mount.start();
-        mount.waitForFinished();
-        cDebug() << "mount:\n" << mount.readAllStandardOutput();
+        auto mountResult = CalamaresUtils::System::runCommand( { "mount" }, std::chrono::seconds( 30 ) );
+        cDebug() << Logger::SubEntry << "mount output:\n" << Logger::NoQuote << mountResult.getOutput();
     }
 
-    CreatePartitionTableOperation op( *m_device, table );
-    op.setStatus( Operation::StatusRunning );
-
-    if ( op.execute( report ) )
-    {
-        return Calamares::JobResult::ok();
-    }
-
-    return Calamares::JobResult::error( message, report.toText() );
+    return KPMHelpers::execute(
+        CreatePartitionTableOperation( *m_device, table ),
+        tr( "The installer failed to create a partition table on %1." ).arg( m_device->name() ) );
 }
 
 void

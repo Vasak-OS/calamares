@@ -1,32 +1,23 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2017-2018, 2020, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2014 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2017-2020 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "CalamaresUtilsSystem.h"
 
 #include "GlobalStorage.h"
 #include "JobQueue.h"
-#include "Settings.h"
+#include "Runner.h"
 #include "utils/Logger.h"
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QProcess>
 #include <QRegularExpression>
 
 #ifdef Q_OS_LINUX
@@ -40,47 +31,6 @@
 #include <sys/sysctl.h>
 // clang-format on
 #endif
-
-/** @brief When logging commands, don't log everything.
- *
- * The command-line arguments to some commands may contain the
- * encrypted password set by the user. Don't log that password,
- * since the log may get posted to bug reports, or stored in
- * the target system.
- */
-struct RedactedList
-{
-    RedactedList( const QStringList& l )
-        : list( l )
-    {
-    }
-
-    const QStringList& list;
-};
-
-QDebug&
-operator<<( QDebug& s, const RedactedList& l )
-{
-    // Special case logging: don't log the (encrypted) password.
-    if ( l.list.contains( "usermod" ) )
-    {
-        for ( const auto& item : l.list )
-            if ( item.startsWith( "$6$" ) )
-            {
-                s << "<password>";
-            }
-            else
-            {
-                s << item;
-            }
-    }
-    else
-    {
-        s << l.list;
-    }
-
-    return s;
-}
 
 namespace CalamaresUtils
 {
@@ -110,7 +60,7 @@ System::instance()
     if ( !s_instance )
     {
         cError() << "No Calamares system-object has been created.";
-        cError() << Logger::SubEntry << "using a bogus instance instead.";
+        cDebug() << Logger::SubEntry << "using a bogus instance instead.";
         return new System( true, nullptr );
     }
     return s_instance;
@@ -124,97 +74,9 @@ System::runCommand( System::RunLocation location,
                     const QString& stdInput,
                     std::chrono::seconds timeoutSec )
 {
-    if ( args.isEmpty() )
-    {
-        cWarning() << "Cannot run an empty program list";
-        return ProcessResult::Code::FailedToStart;
-    }
-
-    Calamares::GlobalStorage* gs
-        = Calamares::JobQueue::instance() ? Calamares::JobQueue::instance()->globalStorage() : nullptr;
-
-    if ( ( location == System::RunLocation::RunInTarget ) && ( !gs || !gs->contains( "rootMountPoint" ) ) )
-    {
-        cWarning() << "No rootMountPoint in global storage";
-        return ProcessResult::Code::NoWorkingDirectory;
-    }
-
-    QString program;
-    QStringList arguments( args );
-
-    if ( location == System::RunLocation::RunInTarget )
-    {
-        QString destDir = gs->value( "rootMountPoint" ).toString();
-        if ( !QDir( destDir ).exists() )
-        {
-            cWarning() << "rootMountPoint points to a dir which does not exist";
-            return ProcessResult::Code::NoWorkingDirectory;
-        }
-
-        program = "chroot";
-        arguments.prepend( destDir );
-    }
-    else
-    {
-        program = "env";
-    }
-
-    QProcess process;
-    process.setProgram( program );
-    process.setArguments( arguments );
-    process.setProcessChannelMode( QProcess::MergedChannels );
-
-    if ( !workingPath.isEmpty() )
-    {
-        if ( QDir( workingPath ).exists() )
-        {
-            process.setWorkingDirectory( QDir( workingPath ).absolutePath() );
-        }
-        else
-        {
-            cWarning() << "Invalid working directory:" << workingPath;
-            return ProcessResult::Code::NoWorkingDirectory;
-        }
-    }
-
-    cDebug() << "Running" << program << RedactedList( arguments );
-    process.start();
-    if ( !process.waitForStarted() )
-    {
-        cWarning() << "Process" << args.first() << "failed to start" << process.error();
-        return ProcessResult::Code::FailedToStart;
-    }
-
-    if ( !stdInput.isEmpty() )
-    {
-        process.write( stdInput.toLocal8Bit() );
-    }
-    process.closeWriteChannel();
-
-    if ( !process.waitForFinished( timeoutSec > std::chrono::seconds::zero()
-                                       ? ( static_cast< int >( std::chrono::milliseconds( timeoutSec ).count() ) )
-                                       : -1 ) )
-    {
-        ( cWarning() << "Process" << args.first() << "timed out after" << timeoutSec.count() << "s. Output so far:\n" ).noquote().nospace() << process.readAllStandardOutput();
-        return ProcessResult::Code::TimedOut;
-    }
-
-    QString output = QString::fromLocal8Bit( process.readAllStandardOutput() ).trimmed();
-
-    if ( process.exitStatus() == QProcess::CrashExit )
-    {
-        ( cWarning() << "Process" << args.first() << "crashed. Output so far:\n" ).noquote().nospace() << output;
-        return ProcessResult::Code::Crashed;
-    }
-
-    auto r = process.exitCode();
-    cDebug() << "Finished. Exit code:" << r;
-    bool showDebug = ( !Calamares::Settings::instance() ) || ( Calamares::Settings::instance()->debugMode() );
-    if ( ( r != 0 ) || showDebug )
-    {
-        ( cDebug() << "Target cmd:" << RedactedList( args ) << "output:\n" ).noquote().nospace() << output;
-    }
-    return ProcessResult( r, output );
+    Calamares::Utils::Runner r( args );
+    r.setLocation( location ).setInput( stdInput ).setTimeout( timeoutSec ).setWorkingDirectory( workingPath );
+    return r.run();
 }
 
 /// @brief Cheap check if a path is absolute.
@@ -253,12 +115,14 @@ System::createTargetFile( const QString& path, const QByteArray& contents, Write
     QString completePath = targetPath( path );
     if ( completePath.isEmpty() )
     {
+        cWarning() << "No target path for" << path;
         return CreationResult( CreationResult::Code::Invalid );
     }
 
     QFile f( completePath );
     if ( ( mode == WriteMode::KeepExisting ) && f.exists() )
     {
+        cWarning() << "Target file" << completePath << "already exists";
         return CreationResult( CreationResult::Code::AlreadyExists );
     }
 
@@ -271,18 +135,45 @@ System::createTargetFile( const QString& path, const QByteArray& contents, Write
 
     if ( !f.open( m ) )
     {
+        cWarning() << "Could not open target file" << completePath;
         return CreationResult( CreationResult::Code::Failed );
     }
 
-    if ( f.write( contents ) != contents.size() )
+    auto written = f.write( contents );
+    if ( written != contents.size() )
     {
         f.close();
         f.remove();
+        cWarning() << "Short write (" << written << "out of" << contents.size() << "bytes) to" << completePath;
         return CreationResult( CreationResult::Code::Failed );
     }
 
     f.close();
     return CreationResult( QFileInfo( f ).canonicalFilePath() );
+}
+
+QStringList
+System::readTargetFile( const QString& path ) const
+{
+    const QString completePath = targetPath( path );
+    if ( completePath.isEmpty() )
+    {
+        return QStringList();
+    }
+
+    QFile f( completePath );
+    if ( !f.open( QIODevice::ReadOnly ) )
+    {
+        return QStringList();
+    }
+
+    QTextStream in( &f );
+    QStringList l;
+    while ( !in.atEnd() )
+    {
+        l << in.readLine();
+    }
+    return l;
 }
 
 void
@@ -339,7 +230,7 @@ System::createTargetParentDirs( const QString& filePath ) const
 }
 
 
-QPair< quint64, float >
+QPair< qint64, qreal >
 System::getTotalMemoryB() const
 {
 #ifdef Q_OS_LINUX

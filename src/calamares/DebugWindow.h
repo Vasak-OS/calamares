@@ -1,20 +1,11 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2015, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef CALAMARES_DEBUGWINDOW_H
@@ -22,6 +13,7 @@
 
 #include "VariantModel.h"
 
+#include <QPointer>
 #include <QVariant>
 #include <QWidget>
 
@@ -55,6 +47,44 @@ private:
     QVariant m_module;
     std::unique_ptr< VariantModel > m_globals_model;
     std::unique_ptr< VariantModel > m_module_model;
+};
+
+/** @brief Manager for the (single) DebugWindow
+ *
+ * Only one DebugWindow is expected to be around. This class manages
+ * (exactly one) DebugWindow and can create and destroy it as needed.
+ * It is available to the Calamares panels as object `DebugWindow`.
+ */
+class DebugWindowManager : public QObject
+{
+    Q_OBJECT
+
+    /// @brief Proxy to Settings::debugMode() default @c false
+    Q_PROPERTY( bool enabled READ enabled CONSTANT FINAL )
+
+    /** @brief Is the debug window visible?
+     *
+     * Writing @c true to this **may** make the debug window visible to
+     * the user; only if debugMode() is on.
+     */
+    Q_PROPERTY( bool visible READ visible WRITE show NOTIFY visibleChanged )
+
+public:
+    DebugWindowManager( QObject* parent = nullptr );
+    virtual ~DebugWindowManager() override = default;
+
+public Q_SLOTS:
+    bool enabled() const;
+    bool visible() const { return m_visible; }
+    void show( bool visible );
+    void toggle();
+
+signals:
+    void visibleChanged( bool visible );
+
+private:
+    QPointer< DebugWindow > m_debugWindow;
+    bool m_visible = false;
 };
 
 

@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "Manager.h"
@@ -29,6 +20,8 @@
 #include <QThread>
 #include <QTimer>
 
+#include <algorithm>
+
 namespace CalamaresUtils
 {
 namespace Network
@@ -36,10 +29,16 @@ namespace Network
 void
 RequestOptions::applyToRequest( QNetworkRequest* request ) const
 {
+#if QT_VERSION < QT_VERSION_CHECK( 5, 15, 0 )
+    constexpr const auto RedirectPolicyAttribute = QNetworkRequest::FollowRedirectsAttribute;
+#else
+    constexpr const auto RedirectPolicyAttribute = QNetworkRequest::RedirectPolicyAttribute;
+#endif
+
     if ( m_flags & Flag::FollowRedirect )
     {
         // Follows all redirects except unsafe ones (https to http).
-        request->setAttribute( QNetworkRequest::FollowRedirectsAttribute, true );
+        request->setAttribute( RedirectPolicyAttribute, true );
     }
 
     if ( m_flags & Flag::FakeUserAgent )
@@ -63,8 +62,9 @@ public slots:
     void cleanupNam();
 
 public:
-    QUrl m_hasInternetUrl;
-    bool m_hasInternet;
+    QVector< QUrl > m_hasInternetUrls;
+    bool m_hasInternet = false;
+    int m_lastCheckedUrlIndex = -1;
 
     Private();
 
@@ -158,20 +158,95 @@ Manager::hasInternet()
 bool
 Manager::checkHasInternet()
 {
-    bool hasInternet = d->nam()->networkAccessible() == QNetworkAccessManager::Accessible;
-
-    if ( !hasInternet && ( d->nam()->networkAccessible() == QNetworkAccessManager::UnknownAccessibility ) )
+    if ( d->m_hasInternetUrls.empty() )
     {
-        hasInternet = synchronousPing( d->m_hasInternetUrl );
+        return false;
     }
-    d->m_hasInternet = hasInternet;
-    return hasInternet;
+    // It's possible that access was switched off (see below, if the check
+    // fails) so we want to turn it back on first. Otherwise all the
+    // checks will fail **anyway**, defeating the point of the checks.
+#if ( QT_VERSION < QT_VERSION_CHECK( 5, 15, 0 ) )
+    if ( !d->m_hasInternet )
+    {
+        d->nam()->setNetworkAccessible( QNetworkAccessManager::Accessible );
+    }
+#endif
+    if ( d->m_lastCheckedUrlIndex < 0 )
+    {
+        d->m_lastCheckedUrlIndex = 0;
+    }
+    int attempts = 0;
+    do
+    {
+        // Start by pinging the same one as last time
+        d->m_hasInternet = synchronousPing( d->m_hasInternetUrls.at( d->m_lastCheckedUrlIndex ) );
+        // if it's not responding, **then** move on to the next one,
+        // and wrap around if needed
+        if ( !d->m_hasInternet )
+        {
+            if ( ++( d->m_lastCheckedUrlIndex ) >= d->m_hasInternetUrls.size() )
+            {
+                d->m_lastCheckedUrlIndex = 0;
+            }
+        }
+        // keep track of how often we've tried, because there's no point in
+        // going around more than once.
+        attempts++;
+    } while ( !d->m_hasInternet && ( attempts < d->m_hasInternetUrls.size() ) );
+
+
+// For earlier Qt versions (< 5.15.0), set the accessibility flag to
+// NotAccessible if synchronous ping has failed, so that any module
+// using Qt's networkAccessible method to determine whether or not
+// internet connection is actually available won't get confused.
+#if ( QT_VERSION < QT_VERSION_CHECK( 5, 15, 0 ) )
+    if ( !d->m_hasInternet )
+    {
+        d->nam()->setNetworkAccessible( QNetworkAccessManager::NotAccessible );
+    }
+#endif
+
+    emit hasInternetChanged( d->m_hasInternet );
+    return d->m_hasInternet;
 }
 
 void
 Manager::setCheckHasInternetUrl( const QUrl& url )
 {
-    d->m_hasInternetUrl = url;
+    d->m_lastCheckedUrlIndex = -1;
+    d->m_hasInternetUrls.clear();
+    if ( url.isValid() )
+    {
+        d->m_hasInternetUrls.append( url );
+    }
+}
+
+void
+Manager::setCheckHasInternetUrl( const QVector< QUrl >& urls )
+{
+    d->m_lastCheckedUrlIndex = -1;
+    d->m_hasInternetUrls = urls;
+    auto it = std::remove_if(
+        d->m_hasInternetUrls.begin(), d->m_hasInternetUrls.end(), []( const QUrl& u ) { return !u.isValid(); } );
+    if ( it != d->m_hasInternetUrls.end() )
+    {
+        d->m_hasInternetUrls.erase( it, d->m_hasInternetUrls.end() );
+    }
+}
+
+void
+Manager::addCheckHasInternetUrl( const QUrl& url )
+{
+    if ( url.isValid() )
+    {
+        d->m_hasInternetUrls.append( url );
+    }
+}
+
+QVector< QUrl >
+Manager::getCheckInternetUrls() const
+{
+    return d->m_hasInternetUrls;
 }
 
 /** @brief Does a request asynchronously, returns the (pending) reply
@@ -194,6 +269,7 @@ asynchronousRun( QNetworkAccessManager* nam, const QUrl& url, const RequestOptio
     // Bail out early if the request is bad
     if ( reply->error() )
     {
+        cWarning() << "Early reply error" << reply->error() << reply->errorString();
         reply->deleteLater();
         return nullptr;
     }
@@ -223,6 +299,7 @@ synchronousRun( QNetworkAccessManager* nam, const QUrl& url, const RequestOption
     auto* reply = asynchronousRun( nam, url, options );
     if ( !reply )
     {
+        cDebug() << "Could not create request for" << url;
         return qMakePair( RequestStatus( RequestStatus::Failed ), nullptr );
     }
 
@@ -232,11 +309,13 @@ synchronousRun( QNetworkAccessManager* nam, const QUrl& url, const RequestOption
     reply->deleteLater();
     if ( reply->isRunning() )
     {
+        cDebug() << "Timeout on request for" << url;
         return qMakePair( RequestStatus( RequestStatus::Timeout ), nullptr );
     }
     else if ( reply->error() != QNetworkReply::NoError )
     {
-        return qMakePair( RequestStatus( RequestStatus::Timeout ), nullptr );
+        cDebug() << "HTTP error" << reply->error() << "on request for" << url;
+        return qMakePair( RequestStatus( RequestStatus::HttpError ), nullptr );
     }
     else
     {
@@ -279,6 +358,30 @@ QNetworkReply*
 Manager::asynchronousGet( const QUrl& url, const CalamaresUtils::Network::RequestOptions& options )
 {
     return asynchronousRun( d->nam(), url, options );
+}
+
+QDebug&
+operator<<( QDebug& s, const CalamaresUtils::Network::RequestStatus& e )
+{
+    s << int( e.status ) << bool( e );
+    switch ( e.status )
+    {
+    case RequestStatus::Ok:
+        break;
+    case RequestStatus::Timeout:
+        s << "Timeout";
+        break;
+    case RequestStatus::Failed:
+        s << "Failed";
+        break;
+    case RequestStatus::HttpError:
+        s << "HTTP";
+        break;
+    case RequestStatus::Empty:
+        s << "Empty";
+        break;
+    }
+    return s;
 }
 
 

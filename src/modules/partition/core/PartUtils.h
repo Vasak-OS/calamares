@@ -1,21 +1,12 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2015-2016, Teo Mrnjavac <teo@kde.org>
- *   Copyright 2018-2019 Adriaan de Groot <groot@kde.org>
- *   Copyright 2019, Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-FileCopyrightText: 2015-2016 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2018-2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Collabora Ltd <arnaud.ferraris@collabora.com>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef PARTUTILS_H
@@ -31,8 +22,12 @@
 // Qt
 #include <QString>
 
-class PartitionCoreModule;
+class DeviceModel;
 class Partition;
+namespace Logger
+{
+class Once;
+}
 
 namespace PartUtils
 {
@@ -50,39 +45,69 @@ QString convenienceName( const Partition* const candidate );
  * @brief canBeReplaced checks whether the given Partition satisfies the criteria
  * for replacing it with the new OS.
  * @param candidate the candidate partition to replace.
+ * @param o applied to debug-logging.
  * @return true if the criteria are met, otherwise false.
  */
-bool canBeReplaced( Partition* candidate );
+bool canBeReplaced( Partition* candidate, const Logger::Once& o );
 
 /**
  * @brief canBeReplaced checks whether the given Partition satisfies the criteria
  * for resizing (shrinking) it to make room for a new OS.
  * @param candidate the candidate partition to resize.
+ * @param o applied to debug-logging.
  * @return true if the criteria are met, otherwise false.
  */
-bool canBeResized( Partition* candidate );
+bool canBeResized( Partition* candidate, const Logger::Once& o );
 
 /**
  * @brief canBeReplaced checks whether the given Partition satisfies the criteria
  * for resizing (shrinking) it to make room for a new OS.
- * @param core the PartitionCoreModule instance.
+ * @param dm the DeviceModel instance.
  * @param partitionPath the device path of the candidate partition to resize.
+ * @param o applied to debug-logging.
  * @return true if the criteria are met, otherwise false.
  */
-bool canBeResized( PartitionCoreModule* core, const QString& partitionPath );
+bool canBeResized( DeviceModel* dm, const QString& partitionPath, const Logger::Once& o );
 
 /**
  * @brief runOsprober executes os-prober, parses the output and writes relevant
  * data to GlobalStorage.
- * @param core the PartitionCoreModule instance.
+ * @param dm the DeviceModel instance.
  * @return a list of os-prober entries, parsed.
  */
-OsproberEntryList runOsprober( PartitionCoreModule* core );
+OsproberEntryList runOsprober( DeviceModel* dm );
 
 /**
  * @brief Is this system EFI-enabled? Decides based on /sys/firmware/efi
  */
 bool isEfiSystem();
+
+/**
+ * @brief Is the @p partition suitable as an EFI boot partition?
+ * Checks for filesystem type (FAT32).
+ */
+bool isEfiFilesystemSuitableType( const Partition* candidate );
+
+/**
+ * @brief Is the @p partition suitable as an EFI boot partition?
+ * Checks for filesystem size (300MiB, see efiFilesystemMinimumSize).
+ */
+bool isEfiFilesystemSuitableSize( const Partition* candidate );
+
+/** @brief Returns the minimum size of an EFI boot partition in bytes.
+ *
+ * This is determined as 300MiB, based on the FAT32 standard
+ * and EFI documentation (and not a little discussion in Calamares
+ * issues about what works, what is effective, and what is mandated
+ * by the standard and how all of those are different).
+ *
+ * This can be configured through the `partition.conf` file,
+ * key *efiSystemPartitionSize*, which will then apply to both
+ * automatic partitioning **and** the warning for manual partitioning.
+ *
+ * A minimum of 32MiB (which is bonkers-small) is enforced.
+ */
+size_t efiFilesystemMinimumSize();
 
 /**
  * @brief Is the given @p partition bootable in EFI? Depending on
@@ -93,11 +118,13 @@ bool isEfiBootable( const Partition* candidate );
 /** @brief translate @p fsName into a recognized name and type
  *
  * Makes several attempts to translate the string into a
- * name that KPMCore will recognize.
+ * name that KPMCore will recognize. Returns the canonical
+ * filesystem name (e.g. asking for "EXT4" will return "ext4").
+ *
  * The corresponding filesystem type is stored in @p fsType, and
  * its value is FileSystem::Unknown if @p fsName is not recognized.
  */
-QString findFS( QString fsName, FileSystem::Type* fsType );
+QString canonicalFilesystemName( const QString& fsName, FileSystem::Type* fsType );
 
 }  // namespace PartUtils
 

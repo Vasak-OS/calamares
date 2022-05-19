@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <author>
+SPDX-FileCopyrightText: 2014 Teo Mrnjavac &lt;teo@kde.org&gt;
+SPDX-License-Identifier: GPL-3.0-or-later
+ </author>
  <class>Page_UserSetup</class>
  <widget class="QWidget" name="Page_UserSetup">
   <property name="geometry">
@@ -38,7 +42,7 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout">
+    <layout class="QHBoxLayout" name="fullNameLayout">
      <item>
       <widget class="QLineEdit" name="textBoxFullName">
        <property name="minimumSize">
@@ -125,9 +129,9 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_2">
+    <layout class="QHBoxLayout" name="usernameLayout">
      <item>
-      <widget class="QLineEdit" name="textBoxUsername">
+      <widget class="QLineEdit" name="textBoxLoginName">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
          <horstretch>0</horstretch>
@@ -214,7 +218,7 @@
     </spacer>
    </item>
    <item>
-    <widget class="QLabel" name="hostname_label_2">
+    <widget class="QLabel" name="hostnameLabel">
      <property name="text">
       <string>What is the name of this computer?</string>
      </property>
@@ -224,7 +228,7 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_4">
+    <layout class="QHBoxLayout" name="hostnameLayout">
      <item>
       <widget class="QLineEdit" name="textBoxHostname">
        <property name="sizePolicy">
@@ -300,7 +304,7 @@
     </layout>
    </item>
    <item>
-    <spacer name="verticalSpacer_3">
+    <spacer name="hostnameVSpace">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
      </property>
@@ -326,7 +330,7 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
+    <layout class="QHBoxLayout" name="userPasswordLayout">
      <item>
       <widget class="QLineEdit" name="textBoxUserPassword">
        <property name="sizePolicy">
@@ -446,7 +450,7 @@
     </spacer>
    </item>
    <item>
-    <widget class="QCheckBox" name="checkBoxValidatePassword">
+    <widget class="QCheckBox" name="checkBoxRequireStrongPassword">
      <property name="toolTip">
       <string>When this box is checked, password-strength checking is done and you will not be able to use a weak password.</string>
      </property>
@@ -456,7 +460,7 @@
     </widget>
    </item>
    <item>
-    <widget class="QCheckBox" name="checkBoxAutoLogin">
+    <widget class="QCheckBox" name="checkBoxDoAutoLogin">
      <property name="text">
       <string>Log in automatically without asking for the password.</string>
      </property>
@@ -496,7 +500,7 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_5">
+    <layout class="QHBoxLayout" name="rootPasswordLayout">
      <item>
       <widget class="QLineEdit" name="textBoxRootPassword">
        <property name="sizePolicy">

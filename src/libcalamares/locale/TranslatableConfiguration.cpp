@@ -1,24 +1,16 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "TranslatableConfiguration.h"
 
-#include "LabelModel.h"
+#include "TranslationsModel.h"
 
 #include "utils/Logger.h"
 #include "utils/Variant.h"
@@ -31,9 +23,15 @@ namespace CalamaresUtils
 {
 namespace Locale
 {
-TranslatedString::TranslatedString( const QString& string )
+TranslatedString::TranslatedString( const QString& key, const char* context )
+    : m_context( context )
 {
-    m_strings[ QString() ] = string;
+    m_strings[ QString() ] = key;
+}
+
+TranslatedString::TranslatedString( const QString& string )
+    : TranslatedString( string, nullptr )
+{
 }
 
 TranslatedString::TranslatedString( const QVariantMap& map, const QString& key, const char* context )
@@ -71,6 +69,7 @@ TranslatedString::get() const
 QString
 TranslatedString::get( const QLocale& locale ) const
 {
+    // TODO: keep track of special cases like sr@latin and ca@valencia
     QString localeName = locale.name();
     // Special case, sr@latin doesn't have the @latin reflected in the name
     if ( locale.language() == QLocale::Language::Serbian && locale.script() == QLocale::Script::LatinScript )

@@ -1,30 +1,23 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
- *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "LuksBootKeyFileJob.h"
 
 #include "utils/CalamaresUtilsSystem.h"
+#include "utils/Entropy.h"
 #include "utils/Logger.h"
+#include "utils/NamedEnum.h"
 #include "utils/UMask.h"
 #include "utils/Variant.h"
 
 #include "GlobalStorage.h"
 #include "JobQueue.h"
+
+#include <QDir>
 
 LuksBootKeyFileJob::LuksBootKeyFileJob( QObject* parent )
     : Calamares::CppJob( parent )
@@ -113,15 +106,29 @@ static bool
 generateTargetKeyfile()
 {
     CalamaresUtils::UMask m( CalamaresUtils::UMask::Safe );
-    auto r = CalamaresUtils::System::instance()->targetEnvCommand(
-        { "dd", "bs=512", "count=4", "if=/dev/urandom", QString( "of=%1" ).arg( keyfile ) } );
-    if ( r.getExitCode() != 0 )
+
+    // Get the data
+    QByteArray entropy;
+    auto entropySource = CalamaresUtils::getEntropy( 2048, entropy );
+    if ( entropySource != CalamaresUtils::EntropySource::URandom )
     {
-        cWarning() << "Could not create LUKS keyfile:" << r.getOutput() << "(exit code" << r.getExitCode() << ')';
+        cWarning() << "Could not get entropy from /dev/urandom for LUKS.";
         return false;
     }
-    // Give ample time to check that the file was created correctly
-    r = CalamaresUtils::System::instance()->targetEnvCommand( { "ls", "-la", "/" } );
+
+    auto fileResult = CalamaresUtils::System::instance()->createTargetFile(
+        keyfile, entropy, CalamaresUtils::System::WriteMode::Overwrite );
+    entropy.fill( 'A' );
+    if ( !fileResult )
+    {
+        cWarning() << "Could not create LUKS keyfile:" << smash( fileResult.code() );
+        return false;
+    }
+
+    // Give ample time to check that the file was created correctly;
+    // we actually expect ls to return pretty-much-instantly.
+    auto r = CalamaresUtils::System::instance()->targetEnvCommand(
+        { "ls", "-la", "/" }, QString(), QString(), std::chrono::seconds( 5 ) );
     cDebug() << "In target system after creating LUKS file" << r.getOutput();
     return true;
 }
@@ -129,8 +136,10 @@ generateTargetKeyfile()
 static bool
 setupLuks( const LuksDevice& d )
 {
+    // Adding the key can take some times, measured around 15 seconds with
+    // a HDD (spinning rust) and a slow-ish computer. Give it a minute.
     auto r = CalamaresUtils::System::instance()->targetEnvCommand(
-        { "cryptsetup", "luksAddKey", d.device, keyfile }, QString(), d.passphrase, std::chrono::seconds( 15 ) );
+        { "cryptsetup", "luksAddKey", d.device, keyfile }, QString(), d.passphrase, std::chrono::seconds( 60 ) );
     if ( r.getExitCode() != 0 )
     {
         cWarning() << "Could not configure LUKS keyfile on" << d.device << ':' << r.getOutput() << "(exit code"
@@ -138,6 +147,53 @@ setupLuks( const LuksDevice& d )
         return false;
     }
     return true;
+}
+
+static QVariantList
+partitionsFromGlobalStorage()
+{
+    Calamares::GlobalStorage* globalStorage = Calamares::JobQueue::instance()->globalStorage();
+    return globalStorage->value( QStringLiteral( "partitions" ) ).toList();
+}
+
+/// Checks if the partition (represented by @p map) mounts to the given @p path
+STATICTEST bool
+hasMountPoint( const QVariantMap& map, const QString& path )
+{
+    const auto v = map.value( QStringLiteral( "mountPoint" ) );
+    return v.isValid() && QDir::cleanPath( v.toString() ) == path;
+}
+
+STATICTEST bool
+isEncrypted( const QVariantMap& map )
+{
+    return map.contains( QStringLiteral( "luksMapperName" ) );
+}
+
+/// Checks for any partition satisfying @p pred
+STATICTEST bool
+anyPartition( bool ( *pred )( const QVariantMap& ) )
+{
+    const auto partitions = partitionsFromGlobalStorage();
+    return std::find_if( partitions.cbegin(),
+                         partitions.cend(),
+                         [ &pred ]( const QVariant& partitionVariant ) { return pred( partitionVariant.toMap() ); } )
+        != partitions.cend();
+}
+
+STATICTEST bool
+hasUnencryptedSeparateBoot()
+{
+    return anyPartition(
+        []( const QVariantMap& partition )
+        { return hasMountPoint( partition, QStringLiteral( "/boot" ) ) && !isEncrypted( partition ); } );
+}
+
+STATICTEST bool
+hasEncryptedRoot()
+{
+    return anyPartition( []( const QVariantMap& partition )
+                         { return hasMountPoint( partition, QStringLiteral( "/" ) ) && isEncrypted( partition ); } );
 }
 
 Calamares::JobResult
@@ -185,6 +241,14 @@ LuksBootKeyFileJob::exec()
         return Calamares::JobResult::ok();
     }
 
+    // /boot partition is not encrypted, keyfile must not be used
+    // But only if root partition is not encrypted
+    if ( hasUnencryptedSeparateBoot() && !hasEncryptedRoot() )
+    {
+        cDebug() << Logger::SubEntry << "/boot partition is not encrypted, skipping keyfile creation.";
+        return Calamares::JobResult::ok();
+    }
+
     if ( s.devices.first().passphrase.isEmpty() )
     {
         cDebug() << Logger::SubEntry << "No root passphrase.";
@@ -202,6 +266,12 @@ LuksBootKeyFileJob::exec()
 
     for ( const auto& d : s.devices )
     {
+        // Skip setupLuks for root partition if system has an unencrypted /boot
+        if ( d.isRoot && hasUnencryptedSeparateBoot() )
+        {
+            continue;
+        }
+
         if ( !setupLuks( d ) )
             return Calamares::JobResult::error(
                 tr( "Encrypted rootfs setup error" ),

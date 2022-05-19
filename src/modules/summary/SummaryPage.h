@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2014-2015, Teo Mrnjavac <teo@kde.org>
+ *   SPDX-FileCopyrightText: 2014-2015 Teo Mrnjavac <teo@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef SUMMARYPAGE_H
@@ -23,10 +14,13 @@
 
 #include <QWidget>
 
+class Config;
+class SummaryViewStep;
+
 class QLabel;
 class QScrollArea;
 class QVBoxLayout;
-class SummaryViewStep;
+
 
 /** @brief Provide a summary view with to-be-done action descriptions.
 *
@@ -51,23 +45,17 @@ class SummaryPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit SummaryPage( const SummaryViewStep* thisViewStep, QWidget* parent = nullptr );
+    explicit SummaryPage( Config* config, QWidget* parent = nullptr );
 
-    void onActivate();
-    void createContentWidget();
+    /// @brief Create contents showing all of the summary
+    void buildWidgets( Config* config, SummaryViewStep* viewstep );
+    /// @brief Clean up the widgets
+    void cleanup();
 
 private:
-    Calamares::ViewStepList stepsForSummary( const Calamares::ViewStepList& allSteps ) const;
-
-    const SummaryViewStep* m_thisViewStep;
-
     QVBoxLayout* m_layout = nullptr;
     QWidget* m_contentWidget = nullptr;
-
-    QLabel* createTitleLabel( const QString& text ) const;
-    QLabel* createBodyLabel( const QString& text ) const;
-
-    QScrollArea* m_scrollArea;
+    QScrollArea* m_scrollArea = nullptr;
 };
 
-#endif // SUMMARYPAGE_H
+#endif  // SUMMARYPAGE_H

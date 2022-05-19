@@ -1,19 +1,10 @@
-/* === This file is part of Calamares - <https://github.com/calamares> ===
+/* === This file is part of Calamares - <https://calamares.io> ===
  *
- *   Copyright 2019, Adriaan de Groot <groot@kde.org>
+ *   SPDX-FileCopyrightText: 2019 Adriaan de Groot <groot@kde.org>
+ *   SPDX-License-Identifier: GPL-3.0-or-later
  *
- *   Calamares is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *   Calamares is Free Software: see the License-Identifier above.
  *
- *   Calamares is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Calamares. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "PackageChooserPage.h"
@@ -37,53 +28,22 @@ PackageChooserPage::PackageChooserPage( PackageChooserMode mode, QWidget* parent
     m_introduction.screenshot = QPixmap( QStringLiteral( ":/images/no-selection.png" ) );
 
     ui->setupUi( this );
-    CALAMARES_RETRANSLATE( updateLabels(); )
+    CALAMARES_RETRANSLATE( updateLabels(); );
 
     switch ( mode )
     {
     case PackageChooserMode::Optional:
-        FALLTHRU;
+        [[fallthrough]];
     case PackageChooserMode::Required:
         ui->products->setSelectionMode( QAbstractItemView::SingleSelection );
         break;
     case PackageChooserMode::OptionalMultiple:
-        FALLTHRU;
+        [[fallthrough]];
     case PackageChooserMode::RequiredMultiple:
         ui->products->setSelectionMode( QAbstractItemView::ExtendedSelection );
     }
 
     ui->products->setMinimumWidth( 10 * CalamaresUtils::defaultFontHeight() );
-}
-
-/** @brief size the given @p pixmap to @p size
- *
- * This is "smart" in the sense that it tries to keep the image un-scaled
- * (if it's just a little too big) and otherwise scales as needed.
- *
- * Returns a copy if any modifications are done.
- */
-static QPixmap
-smartClip( const QPixmap& pixmap, QSize size )
-{
-    auto pixSize = pixmap.size();
-    if ( ( pixSize.width() <= size.width() ) && ( pixSize.height() <= size.height() ) )
-    {
-        return pixmap;
-    }
-
-    // only slightly bigger? Trim the edges
-    constexpr int margin = 16;
-    if ( ( pixSize.width() <= size.width() + margin ) && ( pixSize.height() <= size.height() + margin ) )
-    {
-        int x = pixSize.width() <= size.width() ? 0 : ( pixSize.width() - size.width() / 2 );
-        int new_width = pixSize.width() <= size.width() ? pixSize.width() : size.width();
-        int y = pixSize.height() <= size.height() ? 0 : ( pixSize.height() - size.height() / 2 );
-        int new_height = pixSize.height() <= size.height() ? pixSize.height() : size.height();
-
-        return pixmap.copy( x, y, new_width, new_height );
-    }
-
-    return pixmap.scaled( size, Qt::KeepAspectRatio );
 }
 
 void
@@ -109,7 +69,7 @@ PackageChooserPage::currentChanged( const QModelIndex& index )
         }
         else
         {
-            ui->productScreenshot->setPixmap( smartClip( currentScreenshot, ui->productScreenshot->size() ) );
+            ui->productScreenshot->setPixmap( currentScreenshot );
         }
     }
 }
@@ -145,8 +105,8 @@ PackageChooserPage::setSelection( const QModelIndex& index )
     if ( index.isValid() )
     {
         ui->products->selectionModel()->select( index, QItemSelectionModel::Select );
-        currentChanged( index );
     }
+    currentChanged( index );
 }
 
 bool
