@@ -27,15 +27,10 @@ class Partition;
 class PartitionNode;
 class PartitionRole;
 
-#if defined( WITH_KPMCORE4API )
+// TODO:3.3: Remove defines, expand in-place
 #define KPM_PARTITION_FLAG( x ) PartitionTable::Flag::x
 #define KPM_PARTITION_STATE( x ) Partition::State::x
 #define KPM_PARTITION_FLAG_ESP PartitionTable::Flag::Boot
-#else
-#define KPM_PARTITION_FLAG( x ) PartitionTable::Flag##x
-#define KPM_PARTITION_STATE( x ) Partition::State##x
-#define KPM_PARTITION_FLAG_ESP PartitionTable::FlagEsp
-#endif
 
 /**
  * Helper functions to manipulate partitions
@@ -102,6 +97,27 @@ Partition* clonePartition( Device* device, Partition* partition );
  * other value if it fails.
  */
 SavePassphraseValue savePassphrase( Partition* partition, const QString& passphrase );
+
+/** @brief Decrypt an encrypted partition.
+ *
+ * Uses @p partition to decrypt the partition.
+ * The passphrase saved in @p partition is used.
+ * Returns the mapped device path or an empty string if it fails.
+ */
+QString cryptOpen( Partition* partition );
+void cryptClose( Partition* partition );
+
+/** @brief Set label of luks encrypted partition.
+ *
+ * Returns true on success or false if it fails.
+ */
+bool cryptLabel( Partition* partition, const QString& label );
+
+/** @brief Returns the luks version used to encrypt the partition.
+ *
+ * Used by cryptLabel
+ */
+int cryptVersion( Partition* partition );
 
 /** @brief Return a result for an @p operation
  *
