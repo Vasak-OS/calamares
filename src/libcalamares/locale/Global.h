@@ -28,7 +28,7 @@
 namespace Calamares
 {
 class GlobalStorage;
-}
+}  // namespace Calamares
 
 namespace CalamaresUtils
 {
@@ -73,6 +73,12 @@ DLLEXPORT void removeGS( Calamares::GlobalStorage& gs, const QString& key );
 /** @brief Remove the *localeConf* map from Global Storage
  */
 DLLEXPORT void clearGS( Calamares::GlobalStorage& gs );
+
+/** @brief Gets a value from the *localeConf* map in @p gs
+ *
+ * If the key is not set (or doesn't exist), returns QString().
+ */
+DLLEXPORT QString readGS( Calamares::GlobalStorage& gs, const QString& key );
 
 }  // namespace Locale
 }  // namespace CalamaresUtils

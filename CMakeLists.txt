@@ -43,18 +43,24 @@
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-set(CALAMARES_VERSION 3.3.0)
-set(CALAMARES_RELEASE_MODE OFF) # Set to ON during a release
+set(CALAMARES_VERSION 3.3.0-alpha1)
+set(CALAMARES_RELEASE_MODE ON) # Set to ON during a release
 
 if(CMAKE_SCRIPT_MODE_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/CMakeModules/ExtendedVersion.cmake)
     set(CMAKE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
-    extend_version( ${CALAMARES_VERSION} OFF _vshort _vlong )
+    extend_version( ${CALAMARES_VERSION} ${CALAMARES_RELEASE_MODE}  _vshort _vlong )
     message("${_vlong}")
     return()
 endif()
 
-project(CALAMARES VERSION ${CALAMARES_VERSION} LANGUAGES C CXX HOMEPAGE_URL "https://calamares.io/")
+# Massage the version for CMake if there is a version-suffix
+string(REGEX REPLACE "-.*" "" CALAMARES_VERSION_SHORT "${CALAMARES_VERSION}")
+# And preserve the original version (suffix and all) because project() overwrites
+# .. but if we're doing non-release builds, this gets replaced with git versioning.
+set(CALAMARES_VERSION_LONG "${CALAMARES_VERSION}")
+
+project(CALAMARES VERSION ${CALAMARES_VERSION_SHORT} LANGUAGES C CXX HOMEPAGE_URL "https://calamares.io/")
 
 if(NOT CALAMARES_RELEASE_MODE AND CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "Do not build development versions in the source-directory.")
@@ -133,22 +139,20 @@ set(CALAMARES_DESCRIPTION_SUMMARY "The distribution-independent installer framew
 # (sr@latin in particular) or location (ca@valencia) need special
 # handling in libcalamares/locale/Translation.h .
 #
-# NOTE: move eo (Esperanto) to _ok once Qt can actually create a
-#       locale for it. (Qt 5.12.2 can, see Translation Status section).
 # NOTE: move ie (Interlingue) to _ok once Qt supports it.
 # NOTE: update these lines by running `txstats.py`, or for full automation
 #       `txstats.py -e`. See also
 #
-# Total 74 languages
-set( _tx_complete az az_AZ ca es fi_FI he hi hr ja ko lt pt_BR
-    pt_PT sq sv tr_TR uk zh_TW )
-set( _tx_good as be ca@valencia cs_CZ da de fa fr fur it_IT ml nl
-    ru si sk tg vi zh_CN )
+# Total 75 languages
+set( _tx_complete az az_AZ ca fi_FI fr he hr ja ko lt pt_BR pt_PT
+    sv tr_TR uk zh_TW )
+set( _tx_good as be ca@valencia cs_CZ da de es fa fur hi it_IT ml
+    nl ru si sk sq tg vi zh_CN )
 set( _tx_ok ar ast bg bn el en_GB es_MX et eu gl hu id is mr nb oc
     pl ro sl sr sr@latin th )
 set( _tx_incomplete eo es_PR gu ie ja-Hira kk kn lo lv mk ne_NP
-    ta_IN te ur zh zh_HK )
-# Total 74 languages
+    ta_IN te ur uz zh zh_HK )
+# Total 75 languages
 
 ### Required versions
 #
@@ -321,7 +325,7 @@ if(ECM_FOUND)
     include(KDEInstallDirs)
 endif()
 
-find_package(KF5 QUIET COMPONENTS CoreAddons Crash DBusAddons)
+find_package(KF5 QUIET COMPONENTS CoreAddons Crash)
 set_package_properties(
     KF5::CoreAddons
     PROPERTIES
@@ -329,14 +333,6 @@ set_package_properties(
     DESCRIPTION "Classes built on QtCore for About Data"
     URL "https://api.kde.org/frameworks/kcoreaddons/"
     PURPOSE "About Calamares"
-)
-set_package_properties(
-    KF5::DBusAddons
-    PROPERTIES
-    TYPE REQUIRED
-    DESCRIPTION "Classes for DBus activation"
-    URL "https://api.kde.org/frameworks/dbusaddons/"
-    PURPOSE "Unique instance of Calamares"
 )
 if(NOT KF5Crash_FOUND)
     if(BUILD_KF5Crash)
@@ -413,19 +409,10 @@ set(Calamares_WITH_QML ${WITH_QML})
 
 ### Transifex Translation status
 #
-# Construct language lists for use. This massages the language lists
-# for use with older Qt (which does not support Esperanto) and checks
-# for some obvious error. The actual work of compiling translations
-# is done in the lang/ directory.
+# Construct language lists for use. This massages the language lists if
+# needed and checks for some obvious errors. The actual work of
+# compiling translations is done in the lang/ directory.
 #
-if(Qt5_VERSION VERSION_GREATER 5.12.1)
-    # At least Qt 5.12.2 seems to support Esperanto in QLocale
-    if("eo" IN_LIST _tx_incomplete)
-        message(STATUS "Esperanto support since Qt 5.12.2, enabling Esperanto locale")
-        list(REMOVE_ITEM _tx_incomplete "eo")
-        list(APPEND _tx_ok "eo")
-    endif()
-endif()
 
 set(curr_tx ${_tx_complete} ${_tx_good} ${_tx_ok} ${_tx_incomplete})
 set(tx_errors OFF)
@@ -505,21 +492,15 @@ add_feature_info(ExampleDistro ${mksquashfs_FOUND} "Create example-distro target
 
 ### CALAMARES PROPER
 #
-set(CALAMARES_VERSION ${CALAMARES_VERSION_MAJOR}.${CALAMARES_VERSION_MINOR}.${CALAMARES_VERSION_PATCH})
-# In rare cases we have hotfix-releases with a tweak
-if(CALAMARES_VERSION_TWEAK)
-    set(CALAMARES_VERSION "${CALAMARES_VERSION}.${CALAMARES_VERSION_TWEAK}")
-endif()
-set(CALAMARES_VERSION_SHORT "${CALAMARES_VERSION}")
 
 # Additional info for non-release builds. The "extended" version information
 # with date and git information (commit, dirty status) is used only
 # by CalamaresVersionX.h, which is included by consumers that need a full
 # version number with all that information; normal consumers can include
 # CalamaresVersion.h with more stable numbers.
-if(NOT BUILD_RELEASE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/")
+if(NOT CALAMARES_RELEASE_MODE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/")
     include(ExtendedVersion)
-    extend_version( "${CALAMARES_VERSION}" OFF CALAMARES_VERSION_SHORT CALAMARES_VERSION )
+    extend_version( "${CALAMARES_VERSION}" OFF CALAMARES_VERSION_SHORT CALAMARES_VERSION_LONG )
 endif()
 
 # Special define for RC (e.g. not-a-release) builds.
@@ -551,6 +532,7 @@ include(GNUInstallDirs)
 # libraries for Calamares.
 set(Calamares_LIBRARIES calamares)
 
+add_subdirectory(3rdparty/kdsingleapplication)
 add_subdirectory(src)
 
 add_feature_info(Python ${WITH_PYTHON} "Python job modules")

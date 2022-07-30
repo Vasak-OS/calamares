@@ -58,6 +58,12 @@ static constexpr const TranslationSpecialCase special_cases[] = {
       QLocale::Script::AnyScript,
       QLocale::Country::AnyCountry,
       "Català (València)" },
+    { "ca_ES@valencia",
+      catalan_regions,
+      QLocale::Language::Catalan,
+      QLocale::Script::AnyScript,
+      QLocale::Country::AnyCountry,
+      "Català (València)" },
     // Simplified Chinese, but drop the (China) from the name
     { "zh_CN",
       nullptr,
@@ -122,7 +128,7 @@ specialCaseSystemLanguage()
     return ( it != std::cend( special_cases ) ) ? QString::fromLatin1( it->id ) : QString();
 }
 
-namespace CalamaresUtils
+namespace Calamares
 {
 namespace Locale
 {
@@ -181,4 +187,4 @@ Translation::getLocale( const Id& localeId )
 }
 
 }  // namespace Locale
-}  // namespace CalamaresUtils
+}  // namespace Calamares
