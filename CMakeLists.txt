@@ -43,8 +43,8 @@
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-set(CALAMARES_VERSION 3.3.0-alpha1)
-set(CALAMARES_RELEASE_MODE ON) # Set to ON during a release
+set(CALAMARES_VERSION 3.3.0-alpha3)
+set(CALAMARES_RELEASE_MODE OFF) # Set to ON during a release
 
 if(CMAKE_SCRIPT_MODE_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/CMakeModules/ExtendedVersion.cmake)
@@ -65,6 +65,11 @@ project(CALAMARES VERSION ${CALAMARES_VERSION_SHORT} LANGUAGES C CXX HOMEPAGE_UR
 if(NOT CALAMARES_RELEASE_MODE AND CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "Do not build development versions in the source-directory.")
 endif()
+# Calamares in the 3.3 series promises ABI compatbility, so it sets a
+# .so-version equal to the series number. We use ci/abicheck.sh to
+# keep track of this. Note that the **alpha** releases also have
+# such an .so-version, but are not ABI-stable yet.
+set(CALAMARES_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 ### OPTIONS
 #
