@@ -11,10 +11,6 @@ sudo: required
 services:
   - docker
 
-notifications:
-  irc:
-    - "chat.freenode.net#manjaro"
-
 install:
   - docker build -t calamares .
 

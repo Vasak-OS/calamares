@@ -52,7 +52,7 @@ Item {
         slides: [
             Slide {
                 title: qsTr("hello")
-                body: qsTr("Manjaro is simple and elegant yet fully customizable. Use as is or create something incredible? You decide.")
+                body: qsTr("VasakOS is simple and elegant yet fully customizable. Use as is or create something incredible? You decide.")
                 footer: qsTr("During the installation, this slideshow will provide a quick introduction.")
             },
             Slide {

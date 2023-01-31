@@ -8,7 +8,7 @@
 # Additional styling can be done using the stylesheet.qss
 # file, also in the branding directory.
 ---
-componentName:  manjaro
+componentName:  vasak
 
 
 ### WELCOME / OVERALL WORDING
@@ -121,18 +121,18 @@ navigation: widget
 # are visible as buttons there if the corresponding *show* keys
 # are set to "true" (they can also be overridden).
 strings:
-    productName:         Manjaro Linux
-    shortProductName:    Manjaro
-    version:             22.0.0
-    shortVersion:        22.0
-    versionedName:       Manjaro Linux 22.0
-    shortVersionedName:  Manjaro 22.0
-    bootloaderEntryName: Manjaro
-    productUrl:          https://manjaro.org/
-    supportUrl:          https://forum.manjaro.org/
-    knownIssuesUrl:      https://gitlab.manjaro.org/
-    releaseNotesUrl:     https://blog.manjaro.org/
-    donateUrl:           https://manjaro.org/donate/
+    productName:         VasakOS Linux 
+    shortProductName:    VasakOS
+    version:             0.0.5
+    shortVersion:        0.0
+    versionedName:       Papilio Alpha
+    shortVersionedName:  Papilio
+    bootloaderEntryName: VasakOS
+    productUrl:          https://os.vasak.net.ar/
+    supportUrl:          https://community.vasak.net.ar/
+    knownIssuesUrl:      https://github.com/Vasak-OS
+    releaseNotesUrl:     https://os.vasak.net.ar/news/
+    donateUrl:           https://os.vasak.net.ar/donate/
 
 # These images are loaded from the branding module directory.
 #
